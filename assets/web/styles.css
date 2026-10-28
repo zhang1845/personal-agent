@@ -218,6 +218,31 @@ html.assistant-open { overflow: hidden; }
 .send-button.button { width: 30px; padding: 6px; flex-shrink: 0; justify-content: center; }
 .send-button svg { width: 16px; height: 16px; }
 .chat-composer>p { margin-top: 8px; font-size: var(--font-caption); line-height: 1.7; color: var(--muted); }
+.chat-composer { flex-shrink: 0; min-width: 0; }
+.chat-file-add.button { height: 28px; padding: 3px 6px; font-size: var(--font-caption); }
+.composer-bottom>span { margin-left: auto; }
+.chat-attachment-list { max-height: 112px; overflow-y: auto; overscroll-behavior: contain; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.chat-file-row { display: flex; align-items: center; gap: 6px; padding: 7px 0; min-width: 0; }
+.chat-file-row + .chat-file-row { border-top: 1px solid var(--line); }
+.chat-file-main { flex: 1; min-width: 0; }
+.chat-file-name { display: block; font-size: var(--font-small); line-height: 1.5; overflow-wrap: anywhere; }
+.chat-file-main .source-meta { display: block; margin-top: 2px; font-size: var(--font-caption); }
+.chat-file-actions { display: flex; flex-shrink: 0; align-items: center; }
+.chat-file-actions .button { padding: 2px 5px; height: 28px; font-size: var(--font-caption); }
+.chat-upload-status { font-size: var(--font-small); line-height: 1.6; color: var(--muted); margin-bottom: 8px; }
+.chat-session-files { padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.chat-session-files>summary { cursor: pointer; font-size: var(--font-small); color: var(--muted); }
+.chat-session-files .chat-file-row:last-child { padding-bottom: 0; }
+.chat-file-warning { color: var(--ink); font-size: var(--font-small); line-height: 1.8; padding: 10px 0; }
+.chat-preview-content { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-body); line-height: 1.85; margin-top: 16px; }
+.action-card .action-preview { width: auto; text-align: left; padding-left: 0; }
+.action-card .chat-truncation-check { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; font-size: var(--font-small); line-height: 1.7; }
+.chat-truncation-check input { margin-top: 4px; flex-shrink: 0; accent-color: var(--ink); }
+@media (max-height: 640px) {
+  .chat-attachment-list { max-height: 64px; }
+  .chat-composer textarea { min-height: 56px; }
+  .chat-stream { padding-top: 12px; padding-bottom: 12px; }
+}
 .chat-message { margin-bottom: 18px; }
 .message-label { font-size: var(--font-caption); color: var(--muted); margin-bottom: 5px; }
 .message-bubble { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-label); line-height: 1.8; }

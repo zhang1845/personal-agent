@@ -17,11 +17,14 @@ from personal_agent.platform_utils import IS_WINDOWS, configure_stdio, private_f
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA = ROOT / 'output' / 'runtime'
+START_TIMEOUT = 30.0
+STOP_TIMEOUT = 15.0
+PROBE_TIMEOUT = .5
 
 
-def probe(port, data_dir=DEFAULT_DATA):
+def probe(port, data_dir=DEFAULT_DATA, timeout=PROBE_TIMEOUT):
     try:
-        with build_opener(ProxyHandler({})).open('http://127.0.0.1:%s/api/runtime' % port, timeout=1) as response:
+        with build_opener(ProxyHandler({})).open('http://127.0.0.1:%s/api/runtime' % port, timeout=timeout) as response:
             data = json.loads(response.read(16384))
         if Path(data.get('project_root', '')).resolve() != ROOT:
             return None
@@ -89,14 +92,51 @@ def stop_service(port, data_dir, state_path, info):
         os.kill(pid, signal.SIGTERM)
     else:
         raise SystemExit('缺少此服务的停止凭据。前台启动的服务请在原窗口按 Ctrl+C 停止。')
-    for _ in range(150):
-        current = probe(port, data_dir)
+    deadline = time.monotonic() + STOP_TIMEOUT
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        current = probe(port, data_dir, timeout=min(PROBE_TIMEOUT, remaining))
         if not current or current.get('service_instance') != info.get('service_instance'):
             state_path.unlink(missing_ok=True)
             print('个人 Agent 后台服务已停止。')
             return
-        time.sleep(.1)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(.1, remaining))
     raise SystemExit('服务尚未退出，请稍后检查状态；没有强制结束进程。')
+
+
+def wait_started(process, port, data_dir, log, timeout=START_TIMEOUT):
+    """A wall-clock deadline includes every request, rather than just sleeps."""
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SystemExit('启动未就绪（等待 %g 秒），请查看 %s。' % (timeout, log))
+        if process.poll() is not None:
+            raise SystemExit('服务未能启动（退出码 %s），请查看 %s。' % (process.returncode, log))
+        info = probe(port, data_dir, timeout=min(PROBE_TIMEOUT, remaining))
+        if info:
+            if info.get('service_pid') != process.pid:
+                raise SystemExit('另一个服务已先启动，请重新检查状态。')
+            return info
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(.1, remaining))
+
+
+def reap_failed_start(process):
+    """Reap only our newly spawned child when it never reached readiness."""
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2)
 
 
 def main(argv=None):
@@ -138,24 +178,13 @@ def main(argv=None):
                 **detached_options())
         ready = False
         try:
-            for _ in range(150):
-                info = probe(args.port, data_dir)
-                if info:
-                    if info.get('service_pid') != process.pid:
-                        raise SystemExit('另一个服务已先启动，请重新检查状态。')
-                    break
-                if process.poll() is not None:
-                    raise SystemExit('服务未能启动，请查看 %s。' % log)
-                time.sleep(.1)
-            if not info:
-                raise SystemExit('启动未就绪，请查看 %s。' % log)
+            info = wait_started(process, args.port, data_dir, log)
             write_state(state_path, {'pid': process.pid, 'port': args.port, 'root': str(ROOT),
                                     'data_dir': str(data_dir), 'instance': info['service_instance'], 'stop_token': token})
             ready = True
         finally:
-            if not ready and process.poll() is None:
-                process.terminate()
-                process.wait(timeout=5)
+            if not ready:
+                reap_failed_start(process)
     url = 'http://127.0.0.1:%s' % args.port
     print('后台服务：' + url + '；关闭终端后仍运行。')
     if args.open:

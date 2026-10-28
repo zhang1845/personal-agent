@@ -66,6 +66,9 @@ class Application:
         if engine is None and model_client is None:
             from .nanobot_engine import NanobotEngine
             self.engine = NanobotEngine(self.calendar, self.store, self.model_client, self.knowledge, workspace=data_dir / "nanobot", execution=self.execution)
+        from .chat_integrations import ChatIntegrations
+        self.chat_integrations = ChatIntegrations(data_dir, self.knowledge, self.importer, self.automations, self.caldav, self.calendar, self.store)
+        self.engine.integrations = self.chat_integrations
         self.token = secrets.token_urlsafe(32)
         self.action_lock = threading.RLock()
         self.chat_lock = threading.RLock()
@@ -76,7 +79,7 @@ class Application:
         self.knowledge.close()
         self.automations.close()
 
-    def apply(self, action_id):
+    def apply(self, action_id, confirmation=None):
         with self.action_lock:
             action = self.store.get_action(action_id)
             if action["status"] == "applied":
@@ -85,7 +88,10 @@ class Application:
                 raise AgentError("action_unavailable", "该草案已执行失败或结果待核实，请查看记录后重新发起", {"action": action})
             tool, args = action["tool"], action["arguments"]
             try:
-                if tool in CALENDAR_WRITES:
+                from .chat_integrations import WRITE_NAMES as CHAT_WRITES
+                if tool in CHAT_WRITES:
+                    result = self.chat_integrations.apply(tool, args, action_id, confirmation)
+                elif tool in CALENDAR_WRITES:
                     result = self.calendar.call(tool, args)
                 elif tool == "assistant_add_task":
                     fields(args, {"title", "due_date"}, {"title"})
@@ -100,6 +106,8 @@ class Application:
                     raise AgentError("unsupported_tool", "该操作不在允许的工具范围内")
             except AgentError as exc:
                 # Calendar request IDs and local source_action_id also protect retries after a process crash.
+                if exc.code == "confirmation_required":
+                    raise
                 status = "unknown" if exc.code in ("unknown_result", "write_outcome_unknown", "unknown_outcome") else "failed"
                 self.store.finish_action(action_id, status, {"error": exc.as_dict()})
                 raise
@@ -196,6 +204,24 @@ class Application:
 
     def route(self, method, path, query, body):
         cal, store = self.calendar, self.store
+        if path == "/api/chat/attachments" and method == "POST":
+            fields(body, {"filename","data","session_id","project_id"}, {"filename","data","session_id"})
+            fields(query, set())
+            session_id = body["session_id"]
+            if not isinstance(session_id,str) or not session_id or len(session_id)>128:
+                raise AgentError("validation_error", "对话编号无效")
+            self.store.get_session(session_id)
+            project_id = self.knowledge.session_project(session_id)
+            if body.get("project_id", project_id) != project_id:
+                raise AgentError("validation_error", "附件与当前项目不匹配，请开始新对话")
+            attachment = self.chat_integrations.upload(body["filename"], body["data"], project_id)
+            attachment = self.chat_integrations.bind_attachments([attachment["id"]], session_id, project_id)[0]
+            return {"attachment": attachment, "session_id": session_id}
+        if path.startswith("/api/chat/previews/") and method == "GET":
+            fields(query, {"session_id"}, {"session_id"})
+            session_id = query["session_id"]
+            project_id = self.knowledge.session_project(session_id)
+            return {"preview": self.chat_integrations.get_preview(path.rsplit("/",1)[1],session_id,project_id)}
         if path.startswith(("/api/imports/","/api/automations","/api/notifications/","/api/caldav","/api/agent-runs","/api/runtime")):
             return self.integrations_route(method,path,query,body)
         if path == "/api/model-api":
@@ -300,24 +326,36 @@ class Application:
         if len(parts) == 3 and parts[:2] == ["api", "memories"] and method == "DELETE":
             fields(body, set())
             return store.delete_memory(parts[2])
+        if method == "POST" and path == "/api/sessions":
+            fields(body, {"project_id"})
+            project_id = body.get("project_id")
+            if project_id is not None: self.knowledge.project(project_id)
+            session = store.new_session("新对话")
+            self.knowledge.bind_session(session["id"], project_id)
+            return {"session": dict(session, project_id=project_id)}
         if method == "GET" and path == "/api/sessions":
             return {"sessions": store.list_sessions()}
         if len(parts) == 3 and parts[:2] == ["api", "sessions"] and method == "GET":
             session = store.get_session(parts[2])
             session.update(messages=store.list_messages(parts[2], 500), actions=store.list_actions(parts[2]), project_id=self.knowledge.session_project(parts[2]))
+            session["attachments"] = self.chat_integrations.list_attachments(parts[2], session["project_id"])
             for message in session["messages"]:
                 message["sources"] = self.knowledge.answer_sources(message["id"])
             return session
         if method == "POST" and path == "/api/chat":
-            fields(body, {"message", "session_id", "model", "project_id"}, {"message"})
+            fields(body, {"message", "session_id", "model", "project_id", "attachment_ids"}, {"message"})
             if "project_id" in body and body["project_id"] is not None:
                 self.knowledge.project(body["project_id"])
+            attachment_ids = body.get("attachment_ids", [])
+            if not isinstance(attachment_ids,list) or len(attachment_ids)>5 or any(not isinstance(x,str) or not x for x in attachment_ids) or len(set(attachment_ids))!=len(attachment_ids):
+                raise AgentError("validation_error", "每条消息最多选择5个不同附件")
             model = None
             if body.get("session_id") is not None and not isinstance(body["session_id"], str):
                 raise AgentError("validation_error", "session_id 必须是字符串")
             with self.chat_lock:
                 config = self.api_settings.snapshot()
                 extra = {"project_id": body["project_id"]} if "project_id" in body else {}
+                if "attachment_ids" in body: extra["attachment_ids"] = body["attachment_ids"]
                 if config["enabled"]:
                     if body.get("model") not in (None, "", config["model"]):
                         raise AgentError("version_conflict", "模型配置已变化，请刷新后发送")
@@ -331,8 +369,10 @@ class Application:
                 model = checked_model(body.get("model", ""))
                 return self.engine.respond(body["message"], session_id=body.get("session_id"), model=model or None, **extra)
         if len(parts) == 4 and parts[:2] == ["api", "actions"] and parts[3] == "apply" and method == "POST":
-            fields(body, set())
-            return self.apply(parts[2])
+            fields(body, {"confirm_truncated"})
+            if "confirm_truncated" in body and type(body["confirm_truncated"]) is not bool:
+                raise AgentError("validation_error", "截选确认无效")
+            return self.apply(parts[2], body)
         if method == "GET" and path == "/api/models":
             return self.model_client.list_models()
         if path == "/api/settings":
@@ -414,7 +454,7 @@ class Handler(BaseHTTPRequestHandler):
                     size = int(self.headers.get("Content-Length", "0"))
                 except ValueError:
                     raise AgentError("validation_error", "请求长度无效")
-                limit = 12*1024*1024 if urlsplit(self.path).path == "/api/imports/document" else MAX_BODY
+                limit = 12*1024*1024 if urlsplit(self.path).path in ("/api/imports/document", "/api/chat/attachments") else MAX_BODY
                 if not 0 <= size <= limit:
                     self.send_data(413, {"error": {"code": "body_too_large", "message": "请求超过此接口的大小限制"}})
                     return
@@ -437,7 +477,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise AgentError("validation_error", "不允许重复参数")
             query = {k: v[0] for k, v in values.items()}
             assets = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
-                      "/calendar.js": ("calendar.js", "text/javascript; charset=utf-8"), "/tasks.js": ("tasks.js", "text/javascript; charset=utf-8"), "/knowledge.js": ("knowledge.js", "text/javascript; charset=utf-8"), "/integrations.js": ("integrations.js", "text/javascript; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+                      "/chat.js": ("chat.js", "text/javascript; charset=utf-8"), "/calendar.js": ("calendar.js", "text/javascript; charset=utf-8"), "/tasks.js": ("tasks.js", "text/javascript; charset=utf-8"), "/knowledge.js": ("knowledge.js", "text/javascript; charset=utf-8"), "/integrations.js": ("integrations.js", "text/javascript; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8"),
                       "/brand.css": ("brand.css", "text/css; charset=utf-8"),
                       "/vendor/Geist-variable.woff2": ("vendor/Geist-variable.woff2", "font/woff2"),
                       "/vendor/bulma-1.0.4.min.css": ("vendor/bulma-1.0.4.min.css", "text/css; charset=utf-8")}

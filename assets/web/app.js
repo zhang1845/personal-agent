@@ -27,7 +27,7 @@
     history: '<path d="M3 4v5h5"/><path d="M3.5 9a9 9 0 1 1 1.4 9M12 7v5l3 2"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/>',
   };
-  const state = { token: "", status: null, prefs: {}, date: "", view: "overview", chatCollapsed: false, calendarMode: "month", calendarLoading: false, calendarError: null, overview: {}, calendarEvents: [], tasks: [], deletedTasks: [], taskFilter: "open", taskSort: "due", editingTask: null, taskForSlots: null, taskSlotRequest: 0, planningTask: null, memories: [], sessions: [], sessionId: null, messages: [], actions: [], models: [], model: "", modelAvailable: false, chatProjectId: null, chatBusy: false, editingEvent: null, eventOriginal: null, eventRequest: null, confirm: null, dataRequest: 0, calendarRequest: 0, sessionRequest: 0 };
+  const state = { token: "", status: null, prefs: {}, date: "", view: "overview", chatCollapsed: false, calendarMode: "month", calendarLoading: false, calendarError: null, overview: {}, calendarEvents: [], tasks: [], deletedTasks: [], taskFilter: "open", taskSort: "due", editingTask: null, taskForSlots: null, taskSlotRequest: 0, planningTask: null, memories: [], sessions: [], sessionId: null, messages: [], actions: [], models: [], model: "", modelAvailable: false, chatProjectId: null, chatBusy: false, sessionAttachments: [], editingEvent: null, eventOriginal: null, eventRequest: null, confirm: null, dataRequest: 0, calendarRequest: 0, sessionRequest: 0 };
   const VIEW_NAMES = { overview: "总览", calendar: "日程", tasks: "待办", memories: "记忆", knowledge: "资料库", automation: "自动化", settings: "设置" };
   let toastTimer;
   let knowledgeUI;
@@ -36,6 +36,8 @@
   let apiFormDirty = false;
   const actionTargetCache = new Map();
   const actionTargetLoads = new Map();
+  const chatDraft = new ChatFiles.Draft();
+  let previewRequest = 0;
 
   function icon(name) {
     const span = document.createElement("span");
@@ -430,7 +432,7 @@
   }
   function setChatMode() {
     const enabled = Boolean(apiConfig && apiConfig.enabled);
-    $("chat-mode").textContent = enabled ? (state.runtimeInfo && !state.runtimeInfo.available ? "智能对话暂不可用，请检查服务" : `智能对话 · ${apiConfig.model}`) : "基础助手 · 可查询日程和资料";
+    $("chat-mode").textContent = enabled ? (state.runtimeInfo && !state.runtimeInfo.available ? "智能对话暂不可用，请检查服务" : `智能对话 · ${apiConfig.model}`) : "基础助手 · 日程、资料与提醒";
   }
   function markAPIFormDirty() { apiFormDirty = true; $("test-api-connection").disabled = true; $("api-test-result").hidden = true; }
   function applyAPISettings(settings) {
@@ -452,13 +454,105 @@
   async function loadSessions() { const result = await api("/api/sessions"); state.sessions = result.sessions || []; const select = $("session-select"); select.replaceChildren(); const first = el("option", "", "新的对话"); first.value = ""; select.append(first); state.sessions.forEach((s) => { const option = el("option", "", s.title || "未命名对话"); option.value = s.id; select.append(option); }); select.value = state.sessionId || ""; }
   function chatWelcome() {
     const welcome = el("div", "chat-welcome");
-    welcome.append(el("h3", "", "从一个问题开始"), el("p", "", "查日程、记待办，也可以搜索你的资料。"));
+    welcome.append(el("h3", "", "从一个问题开始"), el("p", "", "查日程、导入资料、设置提醒，也可以整理待办。"));
     const prompts = el("div", "prompt-chips");
-    [{ label: "查询今天的日程", prompt: "今天有什么安排？" }, { label: "搜索资料", prompt: "搜索资料：" }, { label: "添加待办", prompt: "待办：" }].forEach(({ label, prompt }) => {
+    [{ label: "查询今天的日程", prompt: "今天有什么安排？" }, { label: "导入链接", prompt: "导入链接：" }, { label: "设置提醒", prompt: "明天15:00提醒我整理资料" }].forEach(({ label, prompt }) => {
       const button = el("button", "prompt-chip", label); button.type = "button";
       button.addEventListener("click", () => { $("chat-input").value = prompt; $("chat-input").focus(); }); prompts.append(button);
     });
     welcome.append(prompts); return welcome;
+  }
+  function updateChatControls() {
+    const locked = state.chatBusy || chatDraft.uploading;
+    ["send-message", "session-select", "new-chat", "chat-project", "add-chat-file"].forEach(id => { $(id).disabled = locked; });
+    $("chat-input").readOnly = state.chatBusy;
+  }
+  function resetChatDraft() {
+    chatDraft.reset(); $("chat-files").value = ""; renderChatDraft(); updateChatControls();
+  }
+  function previewBody(preview) {
+    const target = $("chat-preview-body"); target.replaceChildren();
+    const info = [preview.filename || preview.url || "", Number.isFinite(preview.characters) ? `${preview.characters} 字` : ""].filter(Boolean).join(" · ");
+    if (info) target.append(el("p", "source-meta", info));
+    if (preview.warning) target.append(el("p", "chat-file-warning", preview.warning));
+    if (Array.isArray(preview.duplicates) && preview.duplicates.length) target.append(el("p", "field-help", "资料库中可能已有相同内容：" + preview.duplicates.map(item => item.title).join("、")));
+    target.append(el("div", "chat-preview-content", preview.content || "未提取到正文。"));
+    $("chat-preview-title").textContent = preview.title || preview.filename || "资料预览";
+  }
+  function showLocalPreview(preview) {
+    previewRequest++; previewBody(preview); if (!$("chat-preview-dialog").open) $("chat-preview-dialog").showModal();
+  }
+  async function openChatPreview(previewId) {
+    if (!state.sessionId) { showError("chat-error", { message: "请先发送附件或导入请求。" }); return; }
+    const request = ++previewRequest, sessionId = state.sessionId;
+    const target = $("chat-preview-body"); target.replaceChildren(el("p", "field-help", "正在读取资料…"));
+    $("chat-preview-title").textContent = "资料预览"; if (!$("chat-preview-dialog").open) $("chat-preview-dialog").showModal();
+    try {
+      const result = await api(`/api/chat/previews/${encodeURIComponent(previewId)}?${new URLSearchParams({session_id:sessionId})}`);
+      if (request !== previewRequest || state.sessionId !== sessionId || !$("chat-preview-dialog").open) return;
+      previewBody(result.preview);
+    } catch (error) { if (request === previewRequest && $("chat-preview-dialog").open) target.replaceChildren(el("p", "inline-error", explainError(error))); }
+  }
+  function attachmentRow(attachment, removable = false) {
+    const row = el("div", "chat-file-row"), main = el("div", "chat-file-main");
+    main.append(el("span", "chat-file-name", attachment.filename || attachment.title || "文件"), el("span", "source-meta", `${attachment.characters || 0} 字${attachment.truncated ? " · 已截选" : ""}`));
+    const actions = el("div", "chat-file-actions"), view = el("button", "button is-ghost is-small", "预览"); view.type = "button";
+    view.addEventListener("click", () => { if (typeof attachment.content === "string") showLocalPreview(attachment); else openChatPreview(attachment.preview_id || attachment.id); }); actions.append(view);
+    if (removable) { const remove = el("button", "button is-ghost is-small", "移除"); remove.type = "button"; remove.disabled = state.chatBusy || chatDraft.uploading; remove.setAttribute("aria-label", "移除文件 " + (attachment.filename || attachment.title || "")); remove.addEventListener("click", () => { chatDraft.remove(attachment.id); renderChatDraft(); }); actions.append(remove); }
+    row.append(main, actions); return row;
+  }
+  function renderChatDraft() {
+    const list = $("chat-attachments"); list.replaceChildren(); list.hidden = !chatDraft.items.length;
+    chatDraft.items.forEach(attachment => list.append(attachmentRow(attachment, true)));
+    $("chat-upload-status").hidden = !chatDraft.uploading;
+    $("chat-upload-status").textContent = chatDraft.uploading ? "正在解析文件，完成后可发送…" : "";
+  }
+  function readFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => { const data = String(reader.result || "").split(",")[1]; if (!data) reject(new Error("文件读取失败，请重新选择。")); else resolve(data); };
+      reader.onerror = () => reject(new Error("文件读取失败，请重新选择。")); reader.onabort = () => reject(new Error("文件读取已取消。")); reader.readAsDataURL(file);
+    });
+  }
+  async function uploadChatFiles() {
+    const files = Array.from($("chat-files").files || []); $("chat-files").value = "";
+    if (!files.length || state.chatBusy) return;
+    showError("chat-error", null); let ticket, sessionId;
+    const known = new Set([...state.sessionAttachments, ...chatDraft.items].map(item=>item.id));
+    try {
+      ticket = chatDraft.begin(files); const projectId = state.chatProjectId;
+      updateChatControls(); renderChatDraft();
+      if (!state.sessionId) {
+        const created = await api("/api/sessions", {method:"POST",body:{project_id:projectId}});
+        if (!chatDraft.current(ticket)) return;
+        state.sessionId = created.session.id;
+      }
+      sessionId = state.sessionId;
+      for (const file of files) {
+        const data = await readFile(file); if (!chatDraft.current(ticket)) return;
+        const result = await api("/api/chat/attachments", { method:"POST", body:{filename:file.name, data, session_id:sessionId, project_id:projectId} });
+        if (chatDraft.accept(ticket, result.attachment)) renderChatDraft();
+      }
+    } catch (error) {
+      if (!ticket || chatDraft.current(ticket)) {
+        if (sessionId && error.code === "connection_failed") {
+          try {
+            const saved = await api(`/api/sessions/${encodeURIComponent(sessionId)}`);
+            if (chatDraft.current(ticket) && state.sessionId === sessionId) {
+              let restored = 0;
+              (saved.attachments || []).forEach(attachment => { if (!known.has(attachment.id) && chatDraft.accept(ticket, attachment)) restored++; });
+              if (restored) error = {message:"已找回解析完成的文件，请核对列表后发送。尚未发送聊天请求。"};
+            }
+          } catch (_) { /* Keep uploaded IDs and require an explicit later action. */ }
+        }
+        showError("chat-error", error);
+      }
+    }
+    finally {
+      if (ticket) chatDraft.finish(ticket);
+      if (sessionId && state.sessionId === sessionId) { try { await loadSessions(); } catch (_) { /* Keep the known session and uploaded IDs. */ } }
+      renderChatDraft(); updateChatControls();
+    }
   }
   function actionTargetKey(action) { return JSON.stringify([action.arguments.event_id,action.arguments.expected_version]); }
   function savedActionTarget(action) {
@@ -485,6 +579,7 @@
   }
   function actionDetails(action,target=savedActionTarget(action)) {
     const args=action.arguments||{};
+    const review=ChatFiles.reviewLines(action); if(review!==null)return review;
     if(action.tool==="calendar_set_preferences"){
       const labels={timezone:"时区",workdays:"工作日",work_start:"开始工作",work_end:"结束工作",lunch_start:"午休开始",lunch_end:"午休结束",buffer_minutes:"日程间隔"};
       return Object.entries(args).filter(([key])=>labels[key]).map(([key,value])=>`${labels[key]}：${key==="timezone"?timezoneLabel(value):key==="workdays"?value.map(day=>"周"+["一","二","三","四","五","六","日"][day]).join("、"):key==="buffer_minutes"?value+" 分钟":value}`).join("\n");
@@ -513,31 +608,53 @@
     const card = el("article", "action-card"); const status = action.status || "pending"; const args=action.arguments||{};
     const statusText = { pending: "等待确认", applied: "已完成", failed: "操作未完成", unknown: "结果待确认，请勿重复操作" }[status] || status;
     const detail=el("div", "action-detail", actionDetails(action));
-    card.append(el("div", "action-status", statusText), el("h4", "", action.title || "待确认操作"), detail);
+    card.append(el("div", "action-status", statusText), el("h4", "", action.title || args.review && args.review.title || "待确认操作"), detail);
+    if (args.preview_id) { const preview = el("button", "button is-ghost is-small action-preview", "查看完整预览"); preview.type="button"; preview.addEventListener("click",()=>openChatPreview(args.preview_id)); card.append(preview); }
     if (status === "pending") {
-      const button = el("button", "button "+(action.tool==="calendar_delete_event"?"is-danger":"is-primary"), "确认执行"); button.type = "button";
+      const destructive = ["calendar_delete_event", "assistant_delete_reminder"].includes(action.tool);
+      const button = el("button", "button "+(destructive?"is-danger":"is-primary"), "确认执行"); button.type = "button";
+      let targetReady = !args.event_id && (!args.task_id || Boolean(savedActionTarget(action)));
+      let acknowledgement = null, applying = false;
+      const feedback=el("p", "inline-error"); feedback.hidden=true;
+      if (ChatFiles.requiresTruncation(action)) {
+        const label = el("label", "checkbox-label chat-truncation-check"); acknowledgement = el("input", ""); acknowledgement.type="checkbox"; acknowledgement.checked=false;
+        label.append(acknowledgement, el("span", "", "我已核对截选内容")); card.append(label);
+      }
+      const enable = () => { button.disabled = applying || !targetReady || Boolean(acknowledgement && !acknowledgement.checked); if(acknowledgement)acknowledgement.disabled=applying; };
+      if (acknowledgement) acknowledgement.addEventListener("change", enable);
+      enable();
       if(args.event_id){
-        button.disabled=true;button.textContent="正在读取日程…";
-        readActionTarget(action).then(target=>{if(!card.isConnected)return;detail.textContent=actionDetails(action,target);button.textContent="确认执行";button.disabled=false;}).catch(error=>{if(!card.isConnected)return;detail.textContent=error.code==="version_conflict"?"原日程已更新，请重新生成这次操作。":"无法读取原日程，请刷新或重新生成这次操作。";button.textContent="请重新确认";});
-      } else if(args.task_id&&!savedActionTarget(action)){button.disabled=true;button.textContent="请重新确认";}
-      button.addEventListener("click", () => busy(button, async () => {
+        button.textContent="正在读取日程…";
+        readActionTarget(action).then(target=>{if(!card.isConnected)return;const stream=$("chat-stream"),follow=stream.scrollHeight-stream.scrollTop-stream.clientHeight<48;detail.textContent=actionDetails(action,target);button.textContent="确认执行";targetReady=true;enable();if(follow)stream.scrollTop=stream.scrollHeight;}).catch(error=>{if(!card.isConnected)return;detail.textContent=error.code==="version_conflict"?"原日程已更新，请重新生成这次操作。":"无法读取原日程，请刷新或重新生成这次操作。";button.textContent="请重新确认";});
+      } else if(args.task_id&&!savedActionTarget(action)){button.textContent="请重新确认";}
+      button.addEventListener("click", async () => {
+        if(button.disabled)return; applying=true; enable(); feedback.hidden=true;
         try {
-          const result = await api(`/api/actions/${encodeURIComponent(action.id)}/apply`, { method: "POST", body: {} });
+          const confirmation = ChatFiles.confirmation(action, acknowledgement && acknowledgement.checked);
+          const result = await api(`/api/actions/${encodeURIComponent(action.id)}/apply`, { method: "POST", body: confirmation });
           Object.assign(action, result.action || { status: "applied", result: result.result });
-          await refreshAfterWrite("操作已完成"); renderChat();
+          await refreshAfterWrite("操作已完成");
+          if (action.tool === "assistant_save_import" && knowledgeUI) { try { await knowledgeUI.load(); } catch (error) { toast("资料已保存，列表暂未刷新", true); } }
+          if (["assistant_create_reminder", "assistant_update_reminder", "assistant_delete_reminder", "assistant_sync_calendar"].includes(action.tool) && integrationsUI) { try { await integrationsUI.load(); } catch (error) { toast("操作已完成，连接状态暂未刷新", true); } }
+          renderChat();
         } catch (error) {
+          if (error.code === "confirmation_required") { feedback.textContent=explainError(error);feedback.hidden=false;return; }
           if (error.details && error.details.action) Object.assign(action, error.details.action);
           else if (error.code !== "connection_failed") Object.assign(action, { status: ["unknown_outcome", "unknown_result", "write_outcome_unknown"].includes(error.code) ? "unknown" : "failed", result: { error } });
-          if (state.sessionId) { try { await selectSession(state.sessionId); } catch (_) { /* Keep the actual write error visible if the service disconnected. */ } }
+          if (state.sessionId) { try { await selectSession(state.sessionId); } catch (_) { /* Keep the write error visible until its saved state can be read. */ } }
           if (action.status === "pending") { action.status = "unknown"; action.result = { error: { message: "暂时无法确认结果。恢复连接后，请重新打开对话查看，不要重复操作。" } }; }
           renderChat();
-        }
-      })); card.append(button);
+        } finally { applying=false;enable(); }
+      }); card.append(feedback,button);
     } else if (action.result) { const text = action.result.error ? explainError(action.result.error) : "操作已完成。"; card.append(el("p", `action-result${action.result.error ? " failed" : ""}`, text)); }
     return card;
   }
   function renderChat() {
     const stream = $("chat-stream"); stream.replaceChildren();
+    if (state.sessionAttachments.length) {
+      const files = el("details", "chat-session-files"); files.append(el("summary", "", `本次对话的文件（${state.sessionAttachments.length}）`));
+      state.sessionAttachments.forEach(attachment => files.append(attachmentRow(attachment))); stream.append(files);
+    }
     if (!state.messages.length) stream.append(chatWelcome());
     else state.messages.forEach((message) => { const row = el("div", `chat-message ${message.role === "user" ? "user" : "assistant"}`), label = el("div", "message-label", message.role === "user" ? "我" : "助手"); row.append(label, el("div", "message-bubble", message.content || ""));
       if (message.sources && message.sources.length) {
@@ -550,23 +667,26 @@
     stream.scrollTop = stream.scrollHeight;
   }
   async function sendMessage(event) {
-    event.preventDefault(); if (state.chatBusy) return;
-    const input = $("chat-input"), message = input.value.trim(); if (!message) return;
-    showError("chat-error", null); const previous = state.messages.slice(); state.messages.push({ role: "user", content: message }); state.chatBusy = true; input.value = ""; $("send-message").disabled = true; $("session-select").disabled = true; $("new-chat").disabled = true; $("chat-project").disabled = true; renderChat();
+    event.preventDefault(); if (state.chatBusy || chatDraft.uploading) return;
+    const input = $("chat-input"), attachments = chatDraft.snapshot(), original = input.value, message = ChatFiles.message(original, attachments); if (!message) return;
+    showError("chat-error", null); const previous = state.messages.slice(); state.messages.push({ role: "user", content: message + (attachments.length ? "\n\n附件：" + attachments.map(item=>item.filename || item.title).join("、") : "") }); state.chatBusy = true; input.value = ""; updateChatControls(); renderChatDraft(); renderChat();
     if (integrationsUI) integrationsUI.watch(true);
     try {
-      const body = { message, project_id: state.chatProjectId }; if (state.sessionId) body.session_id = state.sessionId; if (state.model) body.model = state.model;
+      const body = { message, project_id: state.chatProjectId }; if (state.sessionId) body.session_id = state.sessionId; if (state.model) body.model = state.model; if (attachments.length) body.attachment_ids = attachments.map(item=>item.id);
       const result = await api("/api/chat", { method: "POST", body }); state.sessionId = result.session_id;
+      state.sessionAttachments = Array.isArray(result.attachments) ? result.attachments : ChatFiles.merge(state.sessionAttachments, attachments);
       state.messages.push({ role: "assistant", content: result.reply || "已处理这条请求。", sources: result.sources || [] }); state.actions.push(...(result.actions || []));
-      await loadSessions();
-    } catch (error) { state.messages = previous; input.value = message; showError("chat-error", error); }
-    finally { if (integrationsUI) integrationsUI.watch(false); state.chatBusy = false; $("send-message").disabled = false; $("session-select").disabled = false; $("new-chat").disabled = false; $("chat-project").disabled = false; renderChat(); }
+      chatDraft.reset(); renderChatDraft();
+      try { await loadSessions(); } catch (error) { toast("消息已处理，对话列表暂未刷新", true); }
+    } catch (error) { state.messages = previous; input.value = original; showError("chat-error", error); }
+    finally { if (integrationsUI) integrationsUI.watch(false); state.chatBusy = false; updateChatControls(); renderChatDraft(); renderChat(); }
   }
   async function selectSession(value) {
-    if (state.chatBusy) return;
+    if (state.chatBusy || chatDraft.uploading) return;
     const request = ++state.sessionRequest;
+    if (value !== state.sessionId) { resetChatDraft(); state.sessionAttachments=[]; previewRequest++; if ($("chat-preview-dialog").open) $("chat-preview-dialog").close(); }
     if (!value) { state.sessionId = null; state.messages = []; state.actions = []; renderChat(); return; }
-    const result = await api(`/api/sessions/${encodeURIComponent(value)}`); if (request !== state.sessionRequest) return; state.sessionId = result.id || value; state.chatProjectId = result.project_id || null; $("chat-project").value = state.chatProjectId || ""; state.messages = result.messages || []; state.actions = result.actions || []; renderChat();
+    const result = await api(`/api/sessions/${encodeURIComponent(value)}`); if (request !== state.sessionRequest) return; state.sessionId = result.id || value; state.chatProjectId = result.project_id || null; $("chat-project").value = state.chatProjectId || ""; state.messages = result.messages || []; state.actions = result.actions || []; state.sessionAttachments = result.attachments || []; renderChat();
   }
   function openEvent(event = null, suggested = null, task = null) {
     state.planningTask = task; $("event-title").readOnly = Boolean(task); $("event-all-day").disabled = Boolean(task); $("event-task-note").hidden = !task;
@@ -703,22 +823,27 @@
     });
     $("refresh-models").addEventListener("click", () => busy($("refresh-models"), loadModels));
     $("chat-project").addEventListener("change", (event) => {
-      state.chatProjectId = event.target.value || null;
-      if (state.messages.length) { state.sessionRequest++; state.sessionId = null; state.messages = []; state.actions = []; $("session-select").value = ""; showError("chat-error", null); renderChat(); toast("已切换项目，将开始新对话"); }
+      if (state.chatBusy || chatDraft.uploading) { event.target.value = state.chatProjectId || ""; return; }
+      state.chatProjectId = event.target.value || null; resetChatDraft(); state.sessionAttachments=[];
+      if (state.messages.length) { state.sessionRequest++; state.sessionId = null; state.messages = []; state.actions = []; $("session-select").value = ""; showError("chat-error", null); toast("已切换项目，将开始新对话"); }
+      renderChat();
     });
     $("chat-form").addEventListener("submit", sendMessage);
-    $("chat-input").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!state.chatBusy && $("chat-input").value.trim()) $("chat-form").requestSubmit(); } });
-    $("new-chat").addEventListener("click", () => { if (state.chatBusy) return; state.sessionRequest++; state.sessionId = null; state.messages = []; state.actions = []; $("session-select").value = ""; showError("chat-error", null); renderChat(); $("chat-input").focus(); });
+    $("add-chat-file").addEventListener("click",()=>{if(!state.chatBusy && !chatDraft.uploading)$("chat-files").click();});
+    $("chat-files").addEventListener("change",uploadChatFiles);
+    $("chat-preview-dialog").addEventListener("close",()=>{previewRequest++;});
+    $("chat-input").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!state.chatBusy && !chatDraft.uploading && ChatFiles.message($("chat-input").value, chatDraft.items)) $("chat-form").requestSubmit(); } });
+    $("new-chat").addEventListener("click", () => { if (state.chatBusy || chatDraft.uploading) return; resetChatDraft(); state.sessionAttachments=[]; previewRequest++; if($("chat-preview-dialog").open)$("chat-preview-dialog").close(); state.sessionRequest++; state.sessionId = null; state.messages = []; state.actions = []; $("session-select").value = ""; showError("chat-error", null); renderChat(); $("chat-input").focus(); });
     $("session-select").addEventListener("change", (event) => { selectSession(event.target.value).catch((error) => showError("chat-error", error)); });
     document.querySelector(".brand").addEventListener("click", (event) => { event.preventDefault(); setView("overview"); });
   }
   async function changeDate(value) { setDate(value); try { await loadData(); showError("global-error", null); } catch (error) { showError("global-error", error); } }
   async function boot() {
-    decorateIcons(); bindEvents(); initializeChatLayout(); renderChat();
+    decorateIcons(); bindEvents(); initializeChatLayout(); renderChatDraft(); updateChatControls(); renderChat();
     try { const bootstrap = await api("/api/bootstrap"); state.token = bootstrap.token || bootstrap.csrf_token || ""; state.status = bootstrap.status; state.prefs = bootstrap.preferences || {};
       knowledgeUI = new KnowledgeUI({api, el, busy, showError, toast, confirmOperation,
         onProjects(projects) { const select = $("chat-project"); select.replaceChildren(); const first = el("option", "", "不限定项目"); first.value = ""; select.append(first); projects.forEach((project) => { const option = el("option", "", project.name); option.value = project.id; select.append(option); }); if (!projects.some(p => p.id === state.chatProjectId)) state.chatProjectId = null; select.value = state.chatProjectId || ""; },
-        onAsk(projectId, query) { if (state.chatBusy) { toast("请等待当前对话完成"); return; } state.sessionId = null; state.sessionRequest++; state.messages = []; state.actions = []; state.chatProjectId = projectId; $("session-select").value = ""; $("chat-project").value = projectId || ""; renderChat(); setChatCollapsed(false); $("chat-input").value = query; $("chat-input").focus(); }
+        onAsk(projectId, query) { if (state.chatBusy || chatDraft.uploading) { toast("请等待当前对话完成"); return; } resetChatDraft(); state.sessionAttachments=[]; state.sessionId = null; state.sessionRequest++; state.messages = []; state.actions = []; state.chatProjectId = projectId; $("session-select").value = ""; $("chat-project").value = projectId || ""; renderChat(); setChatCollapsed(false); $("chat-input").value = query; $("chat-input").focus(); }
       }); knowledgeUI.bind(); await knowledgeUI.load();
       integrationsUI = new IntegrationsUI({api,el,busy,showError,toast,confirmOperation,timezone,today:()=>dateKey(),addDays,refreshData:loadData,onRuntime(runtime,caldav){state.runtimeInfo=runtime;state.caldavSettings=caldav;renderStatus();setChatMode();}});
       integrationsUI.bind(); await integrationsUI.load(); setDate(dateKey(state.status && state.status.current_time || new Date())); renderStatus(); renderPreferences(); await loadData(); const requestedView = location.hash.slice(1); if (VIEW_NAMES[requestedView]) setView(requestedView); await Promise.allSettled([loadModels(), loadSessions()]); }

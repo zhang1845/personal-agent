@@ -97,6 +97,8 @@ class PersonalStore:
         content = checked_text(content, "content", 20000)
         with self.connection() as c:
             cursor = c.execute("INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)", (session_id, role, content, now()))
+            if role == "user":
+                c.execute("UPDATE sessions SET title=? WHERE id=? AND title='新对话' AND (SELECT count(*) FROM messages WHERE session_id=? AND role='user')=1", (content[:40], session_id, session_id))
             c.execute("UPDATE sessions SET updated_at=? WHERE id=?", (now(), session_id))
             return cursor.lastrowid
 

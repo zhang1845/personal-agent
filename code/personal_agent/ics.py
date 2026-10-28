@@ -7,7 +7,7 @@ from .platform_utils import IS_WINDOWS
 from pathlib import Path
 import tempfile
 import uuid
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from .timeutils import zone
 
 from .errors import AgentError
 
@@ -50,12 +50,12 @@ def _instant(value):
 
 def _date_value(instant, zone_name):
     try:
-        local = instant.astimezone(ZoneInfo(zone_name))
-        if (local.hour, local.minute, local.second, local.microsecond) != (0, 0, 0, 0):
-            raise AgentError("export_invalid_event", "全天日程必须使用对应时区的午夜边界")
-        return local.strftime("%Y%m%d")
-    except (ZoneInfoNotFoundError, TypeError, ValueError):
-        raise AgentError("export_invalid_event", "全天日程缺少有效时区")
+        local = instant.astimezone(zone(zone_name))
+    except (AgentError, OSError, TypeError, ValueError, OverflowError):
+        raise AgentError("export_invalid_event", "全天日程缺少有效时区") from None
+    if (local.hour, local.minute, local.second, local.microsecond) != (0, 0, 0, 0):
+        raise AgentError("export_invalid_event", "全天日程必须使用对应时区的午夜边界")
+    return local.strftime("%Y%m%d")
 
 
 def calendar_bytes(events, default_timezone="Asia/Shanghai", now=None):

@@ -20,6 +20,8 @@ class Automations(PersonalStore):
         with self.connection() as c:
             c.execute('CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,body TEXT NOT NULL,version INTEGER NOT NULL)')
             c.execute('CREATE TABLE IF NOT EXISTS notifications(id TEXT PRIMARY KEY,dedupe TEXT UNIQUE,job_id TEXT,title TEXT,body TEXT,state TEXT,created_at TEXT,read INTEGER NOT NULL DEFAULT 0)')
+            columns={row['name'] for row in c.execute('PRAGMA table_info(notifications)')}
+            if 'in_app_only' not in columns:c.execute('ALTER TABLE notifications ADD COLUMN in_app_only INTEGER NOT NULL DEFAULT 0')
             c.execute("UPDATE notifications SET state='unknown' WHERE state='sending'")
     def settings(self):return self.config.public()
     def save_settings(self,body):
@@ -35,19 +37,38 @@ class Automations(PersonalStore):
         return self.config.save(body,validate)
     def jobs(self):
         with self.connection() as c:return [dict(json.loads(r['body']),id=r['id'],version=r['version']) for r in c.execute('SELECT * FROM jobs ORDER BY id')]
-    def save_job(self,body,job_id=None):
-        allowed={'name','kind','time','enabled','lead_minutes','weekdays','expected_version'}
+    def validate_job(self,body,job_id=None):
+        """Normalize a schedule without writing; shared by forms and chat drafts."""
+        allowed={'name','kind','time','enabled','lead_minutes','weekdays','expected_version','run_at','message','in_app_only'}
         if not isinstance(body,dict) or set(body)-allowed:raise AgentError('validation_error','计划字段无效')
-        kind=body.get('kind');name=checked_text(body.get('name'),'计划名称',100);enabled=body.get('enabled',False);at=body.get('time','09:00');days=body.get('weekdays',list(range(7)));lead=body.get('lead_minutes',15)
+        kind=body.get('kind');name=checked_text(body.get('name'),'计划名称',100);enabled=body.get('enabled',False);at=body.get('time','09:00');days=body.get('weekdays',list(range(7)));lead=body.get('lead_minutes',15);in_app_only=body.get('in_app_only',False)
         try:
             if not isinstance(at,str) or not re.fullmatch(r'\d{2}:\d{2}',at):raise ValueError()
             datetime.strptime(at,'%H:%M')
         except (TypeError,ValueError):raise AgentError('validation_error','计划时间须为 HH:MM') from None
-        if kind not in ('daily_summary','event_reminders','task_digest') or type(enabled) is not bool or type(lead) is not int or not 0<=lead<=1440 or not isinstance(days,list) or not days or any(type(d) is not int or not 0<=d<=6 for d in days) or len(set(days))!=len(days):raise AgentError('validation_error','计划类型、提醒时间或工作日无效')
-        data={'name':name,'kind':kind,'time':at,'enabled':enabled,'lead_minutes':lead,'weekdays':days}
+        if kind not in ('daily_summary','event_reminders','task_digest','one_time','daily_reminder') or type(enabled) is not bool or type(in_app_only) is not bool or type(lead) is not int or not 0<=lead<=1440 or not isinstance(days,list) or not days or any(type(d) is not int or not 0<=d<=6 for d in days) or len(set(days))!=len(days):raise AgentError('validation_error','计划类型、提醒时间或工作日无效')
+        data={'name':name,'kind':kind,'time':at,'enabled':enabled,'lead_minutes':lead,'weekdays':days,'in_app_only':in_app_only}
+        if kind=='one_time':
+            tz=zone(self.calendar.call('calendar_get_preferences',{})['preferences']['timezone'])
+            due=parse_datetime(body.get('run_at'),tz)
+            if enabled and due<=datetime.now(timezone.utc):raise AgentError('validation_error','提醒时间已过去，请选择未来时间')
+            data['run_at']=due.isoformat();data['message']=checked_text(body.get('message') or name,'提醒内容',1000)
+        elif kind=='daily_reminder':
+            if 'run_at' in body:raise AgentError('validation_error','重复提醒请使用每日时间与星期')
+            data['message']=checked_text(body.get('message') or name,'提醒内容',1000)
+        elif 'run_at' in body or 'message' in body:
+            raise AgentError('validation_error','仅自定义提醒支持提醒内容')
+        if job_id:
+            if type(body.get('expected_version')) is not int or body['expected_version']<1:raise AgentError('validation_error','请提供最新计划版本')
+            current=next((job for job in self.jobs() if job['id']==job_id),None)
+            if not current:raise AgentError('not_found','找不到提醒计划')
+            if current['version']!=body['expected_version']:raise AgentError('version_conflict','计划已变化，请重新加载')
+        return data
+    def save_job(self,body,job_id=None):
+        data=self.validate_job(body,job_id)
         with self.connection() as c:
             if job_id:
-                if type(body.get('expected_version')) is not int or not c.execute('UPDATE jobs SET body=?,version=version+1 WHERE id=? AND version=?',(json.dumps(data),job_id,body['expected_version'])).rowcount:raise AgentError('version_conflict','计划已变化，请重新加载')
+                if not c.execute('UPDATE jobs SET body=?,version=version+1 WHERE id=? AND version=?',(json.dumps(data),job_id,body['expected_version'])).rowcount:raise AgentError('version_conflict','计划已变化，请重新加载')
             else:job_id=uuid4().hex;c.execute('INSERT INTO jobs VALUES(?,?,1)',(job_id,json.dumps(data)))
         return next(j for j in self.jobs() if j['id']==job_id)
     def delete_job(self,job_id,version):
@@ -75,11 +96,12 @@ class Automations(PersonalStore):
             if not app.notify(body=body,title=title):raise ValueError()
             return 'sent'
         except Exception:raise AgentError('notification_unknown','通知发送结果未确认，请核查目标渠道，不会自动重发') from None
-    def emit(self,key,job_id,title,body):
+    def emit(self,key,job_id,title,body,in_app_only=False):
+        if type(in_app_only) is not bool:raise AgentError('validation_error','通知发送方式无效')
         nid=uuid4().hex
         with self.connection() as c:
             if c.execute('SELECT 1 FROM notifications WHERE dedupe=?',(key,)).fetchone():return None
-            c.execute("INSERT INTO notifications VALUES(?,?,?,?,?,'queued',?,0)",(nid,key,job_id,title,body,now()))
+            c.execute("INSERT INTO notifications(id,dedupe,job_id,title,body,state,created_at,read,in_app_only) VALUES(?,?,?,?,?,'queued',?,0,?)",(nid,key,job_id,title,body,now(),int(in_app_only)))
         return nid
     def drain(self):
         with self.connection() as c:rows=[dict(r) for r in c.execute("SELECT * FROM notifications WHERE state='queued'")]
@@ -89,7 +111,7 @@ class Automations(PersonalStore):
                 continue
             with self.connection() as c:
                 if not c.execute("UPDATE notifications SET state='sending' WHERE id=? AND state='queued'",(row['id'],)).rowcount:continue
-            try:state=self._send(row['title'],row['body'])
+            try:state='in_app' if row['in_app_only'] else self._send(row['title'],row['body'])
             except AgentError:state='unknown'
             with self.connection() as c:c.execute('UPDATE notifications SET state=? WHERE id=?',(state,row['id']))
     def test_notification(self):
@@ -114,8 +136,18 @@ class Automations(PersonalStore):
         try:
             tz=zone(self.calendar.call('calendar_get_preferences',{})['preferences']['timezone']);instant=instant or datetime.now(tz);local=instant.astimezone(tz)
             for job in self.jobs():
-                if not job['enabled'] or local.weekday() not in job['weekdays']:continue
+                if not job['enabled']:continue
                 try:
+                    if job['kind']=='one_time':
+                        due=parse_datetime(job['run_at'],tz);lag=instant.astimezone(timezone.utc)-due
+                        if lag<timedelta(0):continue
+                        if lag<=timedelta(minutes=5):
+                            self.emit(job['id']+':once:'+str(job['version'])+':'+job['run_at'],job['id'],job['name'],job['message'],in_app_only=job.get('in_app_only',False))
+                        # Persist completion even when the scheduled time was missed.
+                        data={k:v for k,v in job.items() if k not in ('id','version')};data['enabled']=False
+                        with self.connection() as c:c.execute('UPDATE jobs SET body=?,version=version+1 WHERE id=? AND version=?',(json.dumps(data),job['id'],job['version']))
+                        continue
+                    if local.weekday() not in job['weekdays']:continue
                     if job['kind']=='event_reminders':
                         events=self.calendar.call('calendar_list_events',{'start':local.isoformat(),'end':(local+timedelta(minutes=job['lead_minutes']+2)).isoformat()})['events']
                         for event in events:
@@ -123,11 +155,11 @@ class Automations(PersonalStore):
                             start=parse_datetime(event['start'],tz);due=start-timedelta(minutes=job['lead_minutes'])
                             if due<=instant and (instant<start or job['lead_minutes']==0) and instant-due<=timedelta(minutes=2):
                                 key=job['id']+':'+event['id']+':'+event['start']+':'+str(job['lead_minutes'])
-                                self.emit(key,job['id'],'日程提醒：'+event['title'],start.astimezone(tz).strftime('%Y-%m-%d %H:%M')+' · '+str(tz))
+                                self.emit(key,job['id'],'日程提醒：'+event['title'],start.astimezone(tz).strftime('%Y-%m-%d %H:%M')+' · '+str(tz),in_app_only=job.get('in_app_only',False))
                     elif local.strftime('%H:%M')==job['time']:
-                        self.emit(job['id']+':'+local.date().isoformat(),job['id'],job['name'],self.summary(job['kind'],instant))
+                        self.emit(job['id']+':'+local.date().isoformat(),job['id'],job['name'],job['message'] if job['kind']=='daily_reminder' else self.summary(job['kind'],instant),in_app_only=job.get('in_app_only',False))
                 except AgentError:
-                    self.emit('error:'+job['id']+':'+local.date().isoformat(),job['id'],'计划执行失败','日历或任务读取未完成，不能将失败视为没有安排；请检查连接。')
+                    self.emit('error:'+job['id']+':'+local.date().isoformat(),job['id'],'计划执行失败','日历或任务读取未完成，不能将失败视为没有安排；请检查连接。',in_app_only=job.get('in_app_only',False))
             self.drain()
         finally:self.tick_lock.release()
     def start(self):

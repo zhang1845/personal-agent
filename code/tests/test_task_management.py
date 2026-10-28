@@ -1,5 +1,6 @@
 """Task migration, reversible deletion and durable local task scheduling."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -19,7 +20,7 @@ class TaskStoreTests(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=3) as pool:
                 stores = list(pool.map(lambda _: PersonalStore(path), range(3)))
             self.assertEqual([], stores[0].list_tasks())
-            with sqlite3.connect(str(path)) as c:
+            with closing(sqlite3.connect(str(path))) as c, c:
                 names = [r[1] for r in c.execute("PRAGMA table_info(tasks)")]
             self.assertEqual(1, names.count("version"))
             self.assertEqual(1, names.count("deleted_at"))
@@ -27,7 +28,7 @@ class TaskStoreTests(unittest.TestCase):
     def test_old_database_migrates_without_losing_data_or_resurrecting_deleted_actions(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "old.sqlite3"
-            with sqlite3.connect(str(path)) as c:
+            with closing(sqlite3.connect(str(path))) as c, c:
                 c.execute("CREATE TABLE tasks(id TEXT PRIMARY KEY,title TEXT NOT NULL,due_date TEXT,completed INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,source_action_id TEXT UNIQUE)")
                 c.execute("INSERT INTO tasks VALUES('old','原有任务','2026-10-28',0,'2026-10-26','source')")
             store = PersonalStore(path)

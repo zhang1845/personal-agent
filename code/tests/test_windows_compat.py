@@ -131,8 +131,25 @@ class ManagedServiceTests(unittest.TestCase):
                 port = sock.getsockname()[1]
             command = [sys.executable, '-X', 'utf8', '-B', str(CODE / 'manage_service.py')]
             tail = ['--port', str(port), '--data-dir', str(data)]
+            def service_diagnostics():
+                log = data / 'service.log'
+                text = log.read_text(encoding='utf-8', errors='replace')[-16384:] if log.exists() else '(service log not created)'
+                diagnostics = ROOT / 'output' / 'ci-service-startup.log'
+                diagnostics.parent.mkdir(parents=True, exist_ok=True)
+                diagnostics.write_text(text, encoding='utf-8')
+                return text
             def run(action):
-                return subprocess.run(command + [action] + tail, cwd=directory, text=True, encoding='utf-8', capture_output=True, timeout=30)
+                # The manager's real 30s startup deadline plus process cleanup and
+                # cold interpreter imports must fit inside this outer test bound.
+                try:
+                    result = subprocess.run(command + [action] + tail, cwd=directory, text=True,
+                                            encoding='utf-8', capture_output=True, timeout=60 if action == 'start' else 30)
+                except subprocess.TimeoutExpired as exc:
+                    self.fail('Managed %s exceeded its test deadline.\n%s\nstdout=%r\nstderr=%r' %
+                              (action, service_diagnostics(), exc.stdout, exc.stderr))
+                if result.returncode and action != 'status':
+                    result.stderr += '\nService startup log:\n' + service_diagnostics()
+                return result
             def request(path, method='GET', body=None, **headers):
                 connection = http.client.HTTPConnection('127.0.0.1', port, timeout=3)
                 try:
@@ -143,7 +160,7 @@ class ManagedServiceTests(unittest.TestCase):
                     connection.close()
             try:
                 started = run('start')
-                self.assertEqual(0, started.returncode, started.stdout + started.stderr + (data / 'service.log').read_text(encoding='utf-8'))
+                self.assertEqual(0, started.returncode, started.stdout + started.stderr + service_diagnostics() if started.returncode else '')
                 self.assertEqual(0, run('status').returncode)
                 status, runtime = request('/api/runtime')
                 self.assertEqual(200, status)

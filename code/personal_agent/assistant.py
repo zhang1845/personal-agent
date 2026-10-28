@@ -9,6 +9,7 @@ from .errors import AgentError
 from .mcp_server import TOOLS
 from .ollama_client import OllamaClient
 from .knowledge import KNOWLEDGE_TOOLS
+from .chat_integrations import TOOL_SCHEMAS as CHAT_TOOLS, WRITE_NAMES as CHAT_WRITES, LABELS as CHAT_LABELS
 from .timeutils import interval, zone
 
 
@@ -22,10 +23,13 @@ CUSTOM_TOOLS = [
     {"name": "assistant_complete_task", "description": "按实际待办 ID 生成完成草案", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"], "additionalProperties": False}},
     {"name": "assistant_save_memory", "description": "只为用户明确要求记住的偏好生成记忆草案", "inputSchema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"], "additionalProperties": False}},
 ]
-ALL_TOOLS = dict(CALENDAR_TOOLS, **{item["name"]: item for item in CUSTOM_TOOLS + KNOWLEDGE_TOOLS})
+WRITE_TOOLS.update(CHAT_WRITES)
+CHAT_TOOL_NAMES = {item["name"] for item in CHAT_TOOLS}
+ALL_TOOLS = dict(CALENDAR_TOOLS, **{item["name"]: item for item in CUSTOM_TOOLS + KNOWLEDGE_TOOLS + CHAT_TOOLS})
 LABELS = {"calendar_create_event": "添加日程", "calendar_update_event": "修改日程", "calendar_delete_event": "取消日程",
           "calendar_set_preferences": "更新日程偏好", "assistant_add_task": "添加待办", "assistant_complete_task": "完成待办",
           "assistant_save_memory": "保存个人记忆"}
+LABELS.update(CHAT_LABELS)
 _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9}
 _NUMBER = r"[0-9零〇一二两三四五六七八九十]+"
@@ -50,6 +54,8 @@ def _number(value):
 
 def _validate(value, schema):
     """Validate the small, explicit tool-schema subset without dependencies."""
+    if "enum" in schema and value not in schema["enum"]:
+        raise AgentError("validation_error", "工具参数不在支持范围内")
     types = schema.get("type", [])
     types = [types] if isinstance(types, str) else types
     valid = {"object": isinstance(value, dict), "array": isinstance(value, list),
@@ -82,12 +88,18 @@ def _validate(value, schema):
 
 
 class AgentEngine:
-    def __init__(self, calendar, store, model_client=None, knowledge=None):
+    def __init__(self, calendar, store, model_client=None, knowledge=None, integrations=None):
         self.calendar, self.store = calendar, store
         self.model_client = model_client or OllamaClient()
         self.knowledge = knowledge
+        self.integrations = integrations
 
-    def _read(self, name, arguments):
+    def _read(self, name, arguments, session_id=None):
+        if name in CHAT_TOOL_NAMES:
+            if not self.integrations: raise AgentError("unsupported_tool", "聊天连接工具尚未就绪")
+            if name in WRITE_TOOLS: raise AgentError("unsupported_tool", "保存和同步需要确认草案")
+            project_id = self.knowledge.session_project(session_id) if self.knowledge else None
+            return self.integrations.read(name, arguments, session_id, project_id)
         if name.startswith("knowledge_"):
             if not self.knowledge: raise AgentError("unsupported_tool", "资料库尚未启用")
             return self.knowledge.call(name, arguments)
@@ -103,11 +115,21 @@ class AgentEngine:
             raise AgentError("unsupported_tool", "不允许调用此工具")
         return self.calendar.call(name, arguments)
 
-    def _prepare_proposal(self, name, arguments):
+    def _prepare_proposal(self, name, arguments, session_id=None):
         if name not in WRITE_TOOLS or not isinstance(arguments, dict):
             raise AgentError("validation_error", "操作草案格式无效")
+        from .chat_rules import denies_writes
+        if session_id:
+            messages = self.store.list_messages(session_id, limit=1)
+            if messages and messages[-1]["role"] == "user" and denies_writes(messages[-1]["content"]):
+                raise AgentError("validation_error", "本条消息要求只读或不做修改，不能生成写入草案")
         args = dict(arguments)
         schema = ALL_TOOLS[name]["inputSchema"]
+        if name in CHAT_WRITES:
+            if not self.integrations: raise AgentError("unsupported_tool", "聊天连接工具尚未就绪")
+            _validate(args, schema)
+            project_id = self.knowledge.session_project(session_id) if self.knowledge else None
+            return self.integrations.prepare(name, args, session_id, project_id)
         if name.startswith("calendar_") and name != "calendar_set_preferences":
             args["request_id"] = str(uuid4())
         _validate(args, schema)
@@ -148,7 +170,7 @@ class AgentEngine:
         return args
 
     def _proposal(self, session_id, name, arguments):
-        args = self._prepare_proposal(name, arguments)
+        args = self._prepare_proposal(name, arguments, session_id)
         return self.store.create_action(session_id, name, args, title=LABELS[name])
 
     def _now(self):
@@ -181,7 +203,6 @@ class AgentEngine:
 
     def _rules(self, message, session_id):
         result = {"reply": "", "actions": [], "tools": [], "needs_clarification": False}
-        if re.search(r'每天|每周|每月|每隔|重复|整个系列',message):return None
         task = re.fullmatch(r"(?:添加)?待办\s*[:：]\s*(.+)", message, re.S)
         memory = re.fullmatch(r"(?:请)?(?:帮我)?记住\s*[:：]?\s*(.+)", message, re.S)
         if task or memory:
@@ -204,9 +225,15 @@ class AgentEngine:
             result["tools"] = [{"name": "assistant_list_memories", "result": value}]
             result["reply"] = "还没有保存个人记忆。" if not value["memories"] else "已保存的个人记忆：\n" + "\n".join("• " + m["content"] for m in value["memories"])
             return result
+        if re.search(r'每天|每周|每月|每隔|重复|整个系列',message):return None
         if re.search(r"取消|删除|改期|挪|推迟|提前", message) and re.search(r"那个|这个|那场|这场", message):
             result.update(reply="请先明确是哪一天、哪一个日程。可以在日程列表中选择后修改或取消；我不会猜测会议对象。", needs_clarification=True)
             return result
+        from .chat_rules import denies_writes
+        if denies_writes(message): return None
+        # These intents must not be treated as incomplete event creation.
+        if re.search(r"改到|改为|改成|挪到|推迟|提前|改期|取消|删除|同步|导入|归档|提醒|摘要|空闲|空档|工作时段|午休", message):
+            return None
         now, tz = self._now()
         day, remove = self._day(message, now)
         times = list(re.finditer(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)", message))
@@ -260,11 +287,14 @@ class AgentEngine:
                     hour = _number(match.group(1))
                     minute = 30 if match.group(2) else (_number(match.group(3)) if match.group(3) else 0)
                     parts = list(re.finditer(r"上午|下午|晚上|凌晨|中午|早上", message))
-                    if len(parts) != 1:
+                    if not parts and 0 <= hour < 24 and not 1 <= hour <= 12:
+                        part = None
+                    elif len(parts) == 1:
+                        part = parts[0].group()
+                    else:
                         raise ValueError()
-                    part = parts[0].group()
-                    remove.append((parts[0].start(), parts[0].end()))
-                    if not 1 <= hour <= 12:
+                    if parts: remove.append((parts[0].start(), parts[0].end()))
+                    if part is not None and not 1 <= hour <= 12:
                         raise ValueError()
                     if part in ("下午", "晚上"):
                         if part == "晚上" and hour == 12:
@@ -275,7 +305,7 @@ class AgentEngine:
                     elif part == "中午":
                         if hour not in (1, 12): raise ValueError()
                         hour = 13 if hour == 1 else 12
-                    elif hour == 12:
+                    elif part is not None and hour == 12:
                         raise ValueError()
                 duration = durations[0]
                 minutes = 30 if duration.group() == "半小时" else _number(duration.group(1)) * (60 if duration.group(2) == "小时" else 1)
@@ -382,7 +412,7 @@ class AgentEngine:
                 if name == "assistant_save_memory" and not re.search(r"记住|保存.{0,8}(偏好|记忆)", message):
                     raise AgentError("validation_error", "保存个人记忆需要用户明确要求记住")
                 if name in WRITE_TOOLS:
-                    parsed.append((name, self._prepare_proposal(name, args)))
+                    parsed.append((name, self._prepare_proposal(name, args, session_id)))
                     continue
                 _validate(args, ALL_TOOLS[name]["inputSchema"])
                 if self.knowledge and project_id and name.startswith("knowledge_"):
@@ -392,7 +422,7 @@ class AgentEngine:
                         args = dict(args, project_id=project_id)
                     if name == "knowledge_get_source" and self.knowledge.source(args["source_id"])["project_id"] != project_id:
                         raise AgentError("validation_error", "该资料不属于当前项目")
-                value = self._read(name, args)
+                value = self._read(name, args, session_id=session_id)
                 if self.knowledge and project_id and name == "knowledge_list_projects":
                     value = {"projects": [p for p in value["projects"] if p["id"] == project_id]}
                 if name == "knowledge_search":
@@ -426,16 +456,28 @@ class AgentEngine:
             if self.store.list_messages(session_id, limit=1) and self.knowledge.session_project(session_id) != context["project_id"]:
                 raise AgentError("validation_error", "切换关联项目需要开始新对话")
             self.knowledge.bind_session(session_id, context["project_id"])
+        if self.integrations:
+            project_id = self.knowledge.session_project(session_id) if self.knowledge else None
+            self.integrations.bind_attachments(context.get("attachment_ids", []), session_id, project_id)
+            self.integrations.set_turn(session_id, message, project_id)
         self.store.add_message(session_id, "user", message)
         mode = "rules"
         try:
-            result = self._rules(message, session_id)
+            from .chat_rules import handle, compound_request
+            compound = compound_request(message)
+            result = None
+            if compound and not model:
+                result = {"reply":"这条请求包含多个步骤。请分成几条发送，或在设置中启用智能对话后一起处理；本轮没有做更改。", "actions":[], "tools":[], "needs_clarification":True}
+            if not compound:
+                result = handle(self, message, session_id, model_available=bool(model), attachment_ids=context.get("attachment_ids", []))
+            if result is None and not compound:
+                result = self._rules(message, session_id)
             if result is None:
                 if model:
                     mode = "nanobot" if context.get("model_provider") == "nanobot" else "api" if context.get("model_provider") == "api" else "ollama"
                     result = self._model(message, session_id, model)
                 else:
-                    result = self._knowledge_context(message, session_id) or {"reply": "我可以查日程、添加待办和保存记忆。安排日程时请说清日期、开始时间和时长。更复杂的请求可在设置中启用智能对话。", "actions": [], "tools": [], "needs_clarification": True}
+                    result = self._knowledge_context(message, session_id) or {"reply": "我可以查改日程、找空闲时间、记待办、导入资料和设置提醒。请说清要处理的内容；更复杂的分析可在设置中启用智能对话。", "actions": [], "tools": [], "needs_clarification": True}
         except AgentError as error:
             result = {"reply": error.message + "。尚未做更改。", "actions": [], "tools": [], "needs_clarification": True, "error": error.as_dict()}
         if mode in ("ollama", "api") and not result["actions"]:

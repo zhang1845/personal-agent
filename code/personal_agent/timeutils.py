@@ -10,11 +10,12 @@ MAX_RANGE_DAYS = 31
 
 
 def zone(name):
-    if not isinstance(name, str) or not name or len(name) > 100:
+    if (not isinstance(name, str) or not name or len(name) > 100
+            or any(ord(char) < 32 or ord(char) == 127 for char in name)):
         raise AgentError("validation_error", "时区需要有效的 IANA 名称")
     try:
         return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
+    except (ZoneInfoNotFoundError, ValueError, OSError):
         raise AgentError("validation_error", "未知时区", {"timezone": name})
 
 
