@@ -207,7 +207,11 @@ def handle(engine, message, session_id, model_available=False, attachment_ids=No
                 recurring=bool(re.search(r'每天|每日|每周|工作日',message))
                 selected_days=weekday_selection(message)
                 if selected_days is not None:weekdays=selected_days
-                content=re.split(r'提醒我|提醒|摘要',message,maxsplit=1)[-1].strip(' ，,。:：') or '查看今天的安排'
+                content=re.split(r'提醒我|提醒|摘要',message,maxsplit=1)[-1].strip(' ，,。:：')
+                if not content:
+                    if re.search(r'安排摘要|日程摘要',message):content='今日安排摘要'
+                    elif re.search(r'到期待办摘要|待办摘要',message):content='到期待办摘要'
+                    else:return result('请说明要提醒的内容，例如“明天15:00提醒我整理材料”。',clarify=True)
                 if recurring:
                     if not at:return result('请说明提醒时间，例如“每天09:00提醒我查看今天安排”。',clarify=True)
                     kind='daily_summary' if re.search(r'今天.*安排|今日.*(?:日程|安排)|安排摘要|日程摘要',message) else 'task_digest' if re.search(r'到期.*(?:待办|任务)|待办摘要',message) else 'daily_reminder'

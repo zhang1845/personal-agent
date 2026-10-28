@@ -124,6 +124,12 @@ class ChatWorkflowTests(unittest.TestCase):
         self.assertEqual([],self.server.application.automations.inbox())
         self.assertEqual([],self.chat('不要每天提醒我喝水')['actions'])
 
+    def test_missing_reminder_content_is_clarified_without_inventing_a_task(self):
+        for message in ('明天15:00提醒我','每天09:00提醒我'):
+            with self.subTest(message=message):
+                value=self.chat(message);self.assertEqual([],value['actions']);self.assertIn('内容',value['reply'])
+        self.assertEqual([],self.server.application.automations.jobs())
+
     def test_one_time_and_weekly_reminders_and_notification_config_change(self):
         value=self.chat('明天15:00提醒我整理材料');action=value['actions'][0]
         self.assertEqual('one_time',action['arguments']['job']['kind']);self.assertEqual(200,self.apply(action)[0])
