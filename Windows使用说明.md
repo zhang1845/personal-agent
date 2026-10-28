@@ -51,7 +51,7 @@ API/日历/通知配置仍是本机明文，迁移的目录包含凭据。Window
 
 ## 验证范围
 
-本次开发在 macOS 完成，已加入可在两个系统运行的回归测试与 `.github/workflows/compatibility.yml`。本机验证中文路径、配置存储、时区、管道超时、后台启停、数据保留和原有业务；对 Windows 特定分支做针对性模拟。当前没有 Windows 实机或已运行的 Windows CI 结果，不能视为完成实机验收。已查询 PyPI 官方元数据，现有环境中的 28 个平台相关依赖均有适用于 Windows x64 / Python 3.12 的 wheel；这不替代完整安装和运行验证。
+本次开发在 macOS 完成，已加入可在两个系统运行的回归测试与 `.github/workflows/compatibility.yml`。本机验证中文路径、配置存储、时区、管道超时、后台启停、数据保留和原有业务；对 Windows 特定分支做针对性模拟。Windows v0.7 已在 GitHub 托管的真实 Windows 环境完成依赖安装、SDK/时区检查、293项Python测试、15项前端逻辑测试和源码打包（[CI记录](https://github.com/zhang1845/personal-agent/actions/runs/40636773286)）。Windows 桌面双击、浏览器操作与真实账号仍需人工验收；最新源码状态以 Actions 最新结果为准。已查询 PyPI 官方元数据，现有环境中的 28 个平台相关依赖均有适用于 Windows x64 / Python 3.12 的 wheel；这不替代完整安装和运行验证。
 
 Windows 验收应包含首次依赖安装、双击启停、中文路径、日程/待办编辑、文件解析、API 配置保存、关闭命令窗口后服务仍在运行，以及无冲突的正常停止。CI 会运行依赖安装和功能回归，不会代替双击启动及实际浏览器操作。
 

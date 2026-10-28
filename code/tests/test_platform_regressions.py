@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import subprocess
+import os
+import runpy
 import unittest
 from unittest.mock import Mock, patch
 
@@ -84,6 +86,29 @@ class ServiceDeadlineTests(unittest.TestCase):
             manager.wait_started(process, 1234, Path('data'), Path('failed-start.log'))
         self.assertIn('退出码 7', str(caught.exception))
         self.assertIn('failed-start.log', str(caught.exception))
+
+
+class StartupDiagnosticsTests(unittest.TestCase):
+    def test_normal_launch_does_not_schedule_diagnostics(self):
+        with patch.dict(os.environ, {}, clear=True), patch('faulthandler.dump_traceback_later') as timer:
+            env = manager.service_environment('unit-test-token')
+            self.assertNotIn('PERSONAL_AGENT_STARTUP_DIAGNOSTICS', env)
+            runpy.run_path(str(manager.ROOT/'code/run.py'), run_name='diagnostics_test')
+            timer.assert_not_called()
+
+    def test_managed_ci_enables_diagnostics_but_explicit_disable_wins(self):
+        with patch.dict(os.environ, {'CI':'true'}, clear=True):
+            self.assertEqual('1', manager.service_environment('unit-test-token')['PERSONAL_AGENT_STARTUP_DIAGNOSTICS'])
+        with patch.dict(os.environ, {'GITHUB_ACTIONS':'true'}, clear=True):
+            self.assertEqual('1', manager.service_environment('unit-test-token')['PERSONAL_AGENT_STARTUP_DIAGNOSTICS'])
+        with patch.dict(os.environ, {'CI':'true','PERSONAL_AGENT_STARTUP_DIAGNOSTICS':'0'}, clear=True):
+            self.assertEqual('0', manager.service_environment('unit-test-token')['PERSONAL_AGENT_STARTUP_DIAGNOSTICS'])
+
+    def test_explicit_diagnostics_are_scheduled_before_cli_import(self):
+        with patch.dict(os.environ, {'PERSONAL_AGENT_STARTUP_DIAGNOSTICS':'1'}, clear=True), \
+             patch('faulthandler.dump_traceback_later') as timer:
+            runpy.run_path(str(manager.ROOT/'code/run.py'), run_name='diagnostics_test')
+            timer.assert_called_once_with(10, repeat=True)
 
 
 if __name__ == '__main__':

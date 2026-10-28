@@ -17,6 +17,11 @@ from .personal_store import PersonalStore, checked_text, now
 from .timeutils import interval, zone
 
 
+def extract_urls(message):
+    values=re.findall(r"""https?://[^\s<>"'，。；]+""",message)
+    return list(dict.fromkeys(value.rstrip('.,;:!?，。；！？)）]】}》〉"\'') for value in values))
+
+
 def _schema(properties=None, required=()):
     return {'type':'object','properties':properties or {},'required':list(required),'additionalProperties':False}
 
@@ -94,7 +99,7 @@ class ChatIntegrations(PersonalStore):
     def set_turn(self,session_id,message,project_id=None):
         self._session(session_id,project_id)
         if not isinstance(message,str):raise AgentError('validation_error','消息无效')
-        urls={item.rstrip('。，、；;！!？?）)]}》〉\"\'') for item in re.findall(r'''https?://[^\s<>"'，。；]+''',message)}
+        urls=set(extract_urls(message))
         self.turns[session_id]={'project_id':project_id,'urls':urls,'message':message}
 
     def _save_preview(self,preview,session_id,project_id):

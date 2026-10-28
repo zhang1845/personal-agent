@@ -49,6 +49,14 @@ def detached_options(windows=IS_WINDOWS):
     return {'start_new_session': True}
 
 
+def service_environment(token):
+    env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8', PERSONAL_AGENT_STOP_TOKEN=token)
+    if ('PERSONAL_AGENT_STARTUP_DIAGNOSTICS' not in env
+            and any(env.get(flag, '').lower() == 'true' for flag in ('CI', 'GITHUB_ACTIONS'))):
+        env['PERSONAL_AGENT_STARTUP_DIAGNOSTICS'] = '1'
+    return env
+
+
 def write_state(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix='.service-', dir=path.parent)
@@ -166,7 +174,7 @@ def main(argv=None):
         if port_in_use(args.port):
             raise SystemExit('端口已被其他服务占用，请换一个 --port；没有停止其他程序。')
         token = secrets.token_urlsafe(32)
-        env = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8', PERSONAL_AGENT_STOP_TOKEN=token)
+        env = service_environment(token)
         log.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, 'a', encoding='utf-8') as output:

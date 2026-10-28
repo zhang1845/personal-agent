@@ -7,6 +7,7 @@ from pathlib import Path
 import os
 import secrets
 import sqlite3
+from socketserver import TCPServer
 import threading
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -505,10 +506,19 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PATCH = do_PUT = do_DELETE = handle_route
 
 
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # This service only binds a literal loopback address. A reverse DNS lookup
+        # adds no identity/security value and can stall cold macOS startup.
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
 def make_server(data_dir, host="127.0.0.1", port=0, engine=None, model_client=None, calendar=None):
     if host not in ("127.0.0.1", "localhost"):
         raise AgentError("validation_error", "工作台仅能绑定本机 127.0.0.1")
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = LoopbackHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     try:
         server.application = Application(data_dir, engine, model_client, calendar)
@@ -525,6 +535,9 @@ def run_web(data_dir, port=8787, open_browser=False, calendar=None):
         server.application.automations.start()
     except ImportError:
         print("调度依赖不可用，请用项目 .venv 启动；定时任务未运行。", flush=True)
+    if os.environ.get("PERSONAL_AGENT_STARTUP_DIAGNOSTICS") == "1":
+        import faulthandler
+        faulthandler.cancel_dump_traceback_later()
     url = "http://127.0.0.1:%s" % server.server_address[1]
     print("个人 Agent 工作台：" + url, flush=True)
     print("数据目录：" + str(Path(data_dir).resolve()), flush=True)

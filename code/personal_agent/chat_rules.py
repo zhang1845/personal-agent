@@ -119,8 +119,8 @@ def handle(engine, message, session_id, model_available=False, attachment_ids=No
         return engine._proposal(session_id, name, args)
 
     if helper:
-        urls = [match.group().rstrip('.,;:!?，。；！？)）]】') for match in URL.finditer(message)]
-        urls = list(dict.fromkeys(urls))
+        from .chat_integrations import extract_urls
+        urls = extract_urls(message)
         save = bool(re.search(r'保存|归档|导入|存到|存入', message)) and not re.search(r'(?:不要|不必|不需要|别|暂不|无需)(?:再|自动)?(?:保存|归档|导入|存到|存入)',message)
         analysis = bool(re.search(r'分析|总结|对比|生成|根据|然后|并且', message))
         if urls and (not model_available or not analysis):
@@ -134,6 +134,14 @@ def handle(engine, message, session_id, model_available=False, attachment_ids=No
                 if save:
                     actions.append(propose('assistant_save_import', {'preview_id':preview['preview_id']}))
             return result(('已提取正文，并生成归档草案。确认后保存。' if save else '已读取以下网页正文，尚未保存。') + '\n\n' + '\n\n'.join(lines), actions, tools)
+        if not urls and save and re.search(r'链接|网页|这份资料|刚才的资料|刚才的预览',message) and not re.search(r'附件|文件',message):
+            previews=[item for item in helper.list_previews(session_id,project_id) if not item.get('filename')]
+            named=[item for item in previews if item.get('title') and item['title'] in message]
+            if named:previews=named
+            elif re.search(r'刚才|最近|上一个',message):previews=previews[:1]
+            if len(previews)==1:
+                return result('已用这次对话的真实网页预览生成归档草案，确认后保存。',[propose('assistant_save_import',{'preview_id':previews[0]['preview_id']})])
+            return result('请先提供链接，或说明要保存的网页标题。多个预览时不会猜测。',clarify=True)
         mentions_attachment = bool(attachment_ids) or bool(re.search(r'附件|上传的文件|这个文件|这些文件', message))
         if mentions_attachment and (not model_available or not analysis):
             attachments = helper.list_attachments(session_id, project_id)

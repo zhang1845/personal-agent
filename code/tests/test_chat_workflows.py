@@ -34,6 +34,18 @@ class ChatWorkflowTests(unittest.TestCase):
     def apply(self,action,**confirmation):
         return self.request('POST','/api/actions/'+action['id']+'/apply',confirmation)
 
+    def test_loopback_startup_does_not_perform_reverse_dns(self):
+        from personal_agent.webapp import make_server
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with TemporaryDirectory() as directory, patch('socket.getfqdn',side_effect=AssertionError('Loopback does not need DNS')):
+            server=make_server(Path(directory))
+            try:
+                self.assertEqual('localhost',server.server_name)
+                self.assertEqual(server.server_address[1],server.server_port)
+            finally:
+                server.server_close();server.application.close()
+
     def test_attachment_upload_chat_preview_confirm_and_restart_metadata(self):
         sid=self.session();attachment=self.upload(sid)
         self.assertEqual([],self.server.application.knowledge.search()['sources'])
@@ -78,6 +90,17 @@ class ChatWorkflowTests(unittest.TestCase):
         self.assertEqual('https://example.com/article',source['url']);self.assertIn('保留原文出处',source['content'])
         other=self.chat('读取 https://example.com/other，不要保存')
         self.assertEqual([],other['actions'])
+
+    def test_link_sentence_punctuation_and_followup_archive_reference_real_preview(self):
+        html=('<html><head><title>后续归档文章</title></head><body><article>'+''.join('<p>保存真实网页原文，以便后续引用和检索。</p>' for _ in range(20))+'</article></body></html>').encode()
+        received=[]
+        def fetch(url):received.append(url);return html,url
+        self.server.application.importer.fetcher=fetch
+        value=self.chat('读取 https://example.com/followup.')
+        self.assertEqual([],value['actions']);self.assertEqual(['https://example.com/followup'],received)
+        saved=self.chat('保存刚才的链接',value['session_id'])
+        self.assertEqual('assistant_save_import',saved['actions'][0]['tool'])
+        self.assertEqual(200,self.apply(saved['actions'][0])[0]);self.assertEqual(1,len(received))
 
     def test_reminder_chat_create_pause_query_delete_without_model_or_send(self):
         created=self.chat('每天09:00提醒我喝水');action=created['actions'][0]

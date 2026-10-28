@@ -118,6 +118,6 @@ node --test code/tests/*.test.cjs
 .venv/bin/python code/package_release.py
 ```
 
-验收使用临时数据库、真实解析器/SDK和模拟外部服务，不把样例塞入你的正式数据。测试结果与未完成的真实账号联调见 `output/acceptance-v0.6.md`。源代码发布包排除 `.venv`、output、运行数据及 Key，迁移后需重装依赖。Windows 与 macOS 回归流程见 `.github/workflows/compatibility.yml`，目前未取得 Windows CI 实跑结果。更多边界见 [开发限制](restrictions.md)。
+验收使用临时数据库、真实解析器/SDK和模拟外部服务，不把样例塞入你的正式数据。测试结果与未完成的真实账号联调见 `output/acceptance-v0.6.md`。源代码发布包排除 `.venv`、output、运行数据及 Key，迁移后需重装依赖。Windows 与 macOS 回归流程见 `.github/workflows/compatibility.yml`。Windows v0.7 的安装、293项Python/15项前端回归和源码打包已有真实CI通过记录（[运行记录](https://github.com/zhang1845/personal-agent/actions/runs/40636773286)）；最新提交状态以 GitHub Actions 为准。更多边界见 [开发限制](restrictions.md)。
 
 依赖项目分别遵循各自开源许可，版本见 `requirements.txt` 和 `requirements.lock.txt`；前端 Bulma 许可证见 `assets/web/vendor/`。本项目原有 MIT 许可不代替第三方许可。
