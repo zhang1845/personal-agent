@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanobot-personal-calendar"
+version = "0.6.0"
+description = "Local personal agent workbench, calendar rules and MCP tools for nanobot"
+requires-python = ">=3.11"
+dependencies = [
+    "nanobot-ai==0.3.5",
+    "trafilatura==2.3.1",
+    "markitdown[pdf,docx,pptx,xlsx]==0.1.9",
+    "APScheduler==3.11.3",
+    "apprise==1.13.1",
+    "caldav==3.6.0",
+    "python-dateutil==2.9.0.post0",
+    "tzdata==2026.5",
+]
+license = {text = "MIT"}
+
+[project.scripts]
+personal-calendar = "personal_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["code"]
+include = ["personal_agent*"]

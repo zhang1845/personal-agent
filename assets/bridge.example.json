@@ -1,0 +1,19 @@
+{
+  "profile_id": "replace-with-stable-account-and-connector-identity",
+  "command": "/absolute/path/to/your/authorized-calendar-adapter",
+  "args": [],
+  "env": {},
+  "writes_enabled": false,
+  "supports_reminders": false,
+  "timeout_seconds": 10,
+  "max_days": 31,
+  "max_events": 200,
+  "tools": {
+    "list_calendars": {"name": "list_calendars", "response_path": "calendars", "complete_path": "complete"},
+    "list_events": {"name": "list_events", "response_path": "events", "complete_path": "complete"},
+    "get_event": {"name": "get_event", "response_path": "event"},
+    "create_event": {"name": "create_event", "response_path": "event"},
+    "update_event": {"name": "update_event", "response_path": "event"},
+    "delete_event": {"name": "delete_event", "response_path": ""}
+  }
+}

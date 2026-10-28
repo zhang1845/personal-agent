@@ -1,0 +1,27 @@
+{
+  "providers": {
+    "ollama": {"apiBase": "http://127.0.0.1:11434/v1"}
+  },
+  "modelPresets": {
+    "local-calendar": {
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "maxTokens": 2048,
+      "contextWindowTokens": 8192,
+      "temperature": 0.1
+    }
+  },
+  "agents": {
+    "defaults": {"modelPreset": "local-calendar", "fallbackModels": []}
+  },
+  "tools": {
+    "mcpServers": {
+      "personal-calendar": {
+        "command": "/ABSOLUTE/PATH/TO/python3",
+        "args": ["-m", "personal_agent", "--db", "/ABSOLUTE/PATH/TO/PROJECT/output/runtime/calendar.sqlite3", "mcp"],
+        "env": {"PYTHONPATH": "/ABSOLUTE/PATH/TO/PROJECT/code"},
+        "enabledTools": ["calendar_status", "calendar_list_calendars", "calendar_list_events", "calendar_get_event", "calendar_create_event", "calendar_update_event", "calendar_delete_event", "calendar_find_free_slots", "calendar_get_preferences", "calendar_set_preferences"]
+      }
+    }
+  }
+}

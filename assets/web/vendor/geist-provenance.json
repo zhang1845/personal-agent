@@ -1,0 +1,16 @@
+[
+  {
+    "file": "Geist-variable.woff2",
+    "source": "https://raw.githubusercontent.com/vercel/geist-font/main/fonts/Geist/webfonts/Geist%5Bwght%5D.woff2",
+    "git_blob": "71dab8bedba3bfef5dccd7875ed05cac44c7345d",
+    "sha256": "2ffebe993e969069a9789d15164b7715d42491b5835516c5e3b935d5f81b05f1",
+    "bytes": 69760
+  },
+  {
+    "file": "GEIST-LICENSE",
+    "source": "https://raw.githubusercontent.com/vercel/geist-font/main/LICENSE.txt",
+    "git_blob": "8d003fec6b8a0f9f866ab1038579b6ea20926ac4",
+    "sha256": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137",
+    "bytes": 4368
+  }
+]

@@ -1,0 +1,43 @@
+name: Desktop compatibility
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: code
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.lock.txt
+      - name: Check dependencies
+        run: python -m pip check
+      - name: Verify Windows runtime and SDK
+        if: runner.os == 'Windows'
+        run: python -X utf8 code/setup_windows.py --verify
+      - name: Python integration and compatibility tests
+        run: python -X utf8 -B -m unittest discover -s code/tests -q
+      - name: Frontend logic tests
+        shell: bash
+        run: node --test code/tests/*.test.cjs
+      - name: Build source release
+        run: python -X utf8 -B code/package_release.py
