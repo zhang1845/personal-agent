@@ -463,12 +463,16 @@ class AgentEngine:
         self.store.add_message(session_id, "user", message)
         mode = "rules"
         try:
-            from .chat_rules import handle, compound_request
+            from .chat_rules import handle, compound_request, literal_content
+            from .chat_integrations import denies_preview_reads
             compound = compound_request(message)
+            read_denied = not literal_content(message) and denies_preview_reads(message)
             result = None
-            if compound and not model:
+            if read_denied:
+                result = {"reply":"不会读取链接或附件，也不会将正文交给模型。若还需要其他操作，请单独说明。", "actions":[], "tools":[], "needs_clarification":False}
+            if not read_denied and compound and not model:
                 result = {"reply":"这条请求包含多个步骤。请分成几条发送，或在设置中启用智能对话后一起处理；本轮没有做更改。", "actions":[], "tools":[], "needs_clarification":True}
-            if not compound:
+            if not compound and not read_denied:
                 result = handle(self, message, session_id, model_available=bool(model), attachment_ids=context.get("attachment_ids", []))
             if result is None and not compound:
                 result = self._rules(message, session_id)

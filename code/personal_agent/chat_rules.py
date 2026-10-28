@@ -119,8 +119,10 @@ def handle(engine, message, session_id, model_available=False, attachment_ids=No
         return engine._proposal(session_id, name, args)
 
     if helper:
-        from .chat_integrations import extract_urls
+        from .chat_integrations import extract_urls, denies_preview_reads
         urls = extract_urls(message)
+        if urls and denies_preview_reads(message):
+            return result("本条消息要求不读取链接，未发起抓取或保存。")
         save = bool(re.search(r'保存|归档|导入|存到|存入', message)) and not re.search(r'(?:不要|不必|不需要|别|暂不|无需)(?:再|自动)?(?:保存|归档|导入|存到|存入)',message)
         analysis = bool(re.search(r'分析|总结|对比|生成|根据|然后|并且', message))
         if urls and (not model_available or not analysis):
@@ -143,6 +145,8 @@ def handle(engine, message, session_id, model_available=False, attachment_ids=No
                 return result('已用这次对话的真实网页预览生成归档草案，确认后保存。',[propose('assistant_save_import',{'preview_id':previews[0]['preview_id']})])
             return result('请先提供链接，或说明要保存的网页标题。多个预览时不会猜测。',clarify=True)
         mentions_attachment = bool(attachment_ids) or bool(re.search(r'附件|上传的文件|这个文件|这些文件', message))
+        if mentions_attachment and denies_preview_reads(message):
+            return result('本条消息要求不读取附件，不会将正文交给模型或生成归档草案。')
         if mentions_attachment and (not model_available or not analysis):
             attachments = helper.list_attachments(session_id, project_id)
             if attachment_ids:

@@ -22,6 +22,10 @@ def extract_urls(message):
     return list(dict.fromkeys(value.rstrip('.,;:!?，。；！？)）]】}》〉"\'') for value in values))
 
 
+def denies_preview_reads(message):
+    return bool(re.search(r'(?:不要|别|不必|无需|暂不|不需要)[^，。；\n]{0,12}(?:读取|抓取|访问|打开|解析|查看)',message))
+
+
 def _schema(properties=None, required=()):
     return {'type':'object','properties':properties or {},'required':list(required),'additionalProperties':False}
 
@@ -188,6 +192,8 @@ class ChatIntegrations(PersonalStore):
     def read(self,name,args,session_id,project_id=None):
         self._session(session_id,project_id)
         if name=='assistant_preview_link':
+            if denies_preview_reads(self.turns.get(session_id,{}).get('message','')):
+                raise AgentError('validation_error','本条消息要求不访问链接，未发起抓取')
             _fields(args,{'url'},{'url'});url=args['url']
             turn=self.turns.get(session_id,{})
             if not isinstance(url,str) or turn.get('project_id')!=project_id or url not in turn.get('urls',set()):raise AgentError('validation_error','只读取你本条消息明确提供的链接，请把链接发到聊天中')
@@ -196,6 +202,8 @@ class ChatIntegrations(PersonalStore):
         if name=='assistant_list_attachments':
             _fields(args,set());return {'attachments':self.list_attachments(session_id,project_id)}
         if name=='assistant_read_attachment':
+            if denies_preview_reads(self.turns.get(session_id,{}).get('message','')):
+                raise AgentError('validation_error','本条消息要求不读取附件，未向模型提供正文')
             _fields(args,{'attachment_id'},{'attachment_id'});return {'preview':self.get_preview(args['attachment_id'],session_id,project_id)}
         if name=='assistant_list_reminders':
             _fields(args,set());return {'jobs':self.automations.jobs(),'inbox':self.automations.inbox(),'notification':self._notification()}

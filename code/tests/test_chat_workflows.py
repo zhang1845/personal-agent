@@ -102,6 +102,18 @@ class ChatWorkflowTests(unittest.TestCase):
         self.assertEqual('assistant_save_import',saved['actions'][0]['tool'])
         self.assertEqual(200,self.apply(saved['actions'][0])[0]);self.assertEqual(1,len(received))
 
+    def test_negative_link_read_is_enforced_in_rules_and_model_tools(self):
+        message='不要访问这个链接 https://example.com/private-context'
+        with patch.object(self.server.application.importer,'article',side_effect=AssertionError('No network')) as read:
+            value=self.chat(message);self.assertEqual([],value['actions']);read.assert_not_called()
+            sid=self.session();helper=self.server.application.chat_integrations;helper.set_turn(sid,message)
+            with self.assertRaises(AgentError):helper.read('assistant_preview_link',{'url':'https://example.com/private-context'},sid)
+            read.assert_not_called()
+        self.server.application.api_settings.save({'base_url':'https://model.example/v1','model':'mock','enabled':True,'expected_version':1})
+        with patch.object(self.server.application.engine,'_model',side_effect=AssertionError('No model disclosure')) as model:
+            value=self.chat('不要读取附件，然后解释归档步骤')
+            self.assertEqual([],value['actions']);model.assert_not_called()
+
     def test_reminder_chat_create_pause_query_delete_without_model_or_send(self):
         created=self.chat('每天09:00提醒我喝水');action=created['actions'][0]
         self.assertEqual([],self.server.application.automations.jobs());self.assertEqual(200,self.apply(action)[0])
