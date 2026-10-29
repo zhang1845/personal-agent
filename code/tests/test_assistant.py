@@ -147,18 +147,18 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual("2026-12-30T15:50:00", args["end"])
         self.assertEqual("方案评审", args["title"])
 
-    def test_missing_or_ambiguous_fields_do_not_guess(self):
+    def test_missing_or_ambiguous_fields_without_model_do_not_guess(self):
         for expression in ("明天15:00评审", "明天评审30分钟", "明天安排评审", "15:00评审30分钟",
                            "明天15:00 30分钟", "明天3点评审30分钟", "明天25:00评审30分钟",
                            "明天15:00评审0分钟", "今天和明天15:00评审30分钟", "2026-02-30 15:00评审30分钟"):
             with self.subTest(expression=expression):
-                result = self.engine.respond(expression, model="local")
+                result = self.engine.respond(expression)
                 self.assertTrue(result["needs_clarification"])
                 self.assert_no_write(result)
         self.assertEqual([], self.model.calls)
 
-    def test_partial_durations_and_ranges_are_not_silently_shortened(self):
-        for message in ("明天15:00 评审一小时半", "明天15:00 评审30到60分钟"):
+    def test_duration_ranges_are_not_silently_shortened(self):
+        for message in ("明天15:00 评审30到60分钟", "明天15:00 评审一到两小时"):
             result = self.engine.respond(message)
             self.assert_no_write(result)
             self.assertTrue(result["needs_clarification"])

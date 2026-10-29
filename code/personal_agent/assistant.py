@@ -33,6 +33,11 @@ LABELS.update(CHAT_LABELS)
 _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9}
 _NUMBER = r"[0-9零〇一二两三四五六七八九十]+"
+_DURATION = re.compile(
+    r"(?<![\d.])(?:(?P<hours>" + _NUMBER + r")\s*(?:个\s*)?小时(?:\s*(?P<extra>" + _NUMBER + r")\s*分钟|\s*(?P<tail_half>半))?"
+    r"|(?:(?P<half_hours>" + _NUMBER + r")\s*(?:个\s*)?)?半\s*(?:个\s*)?小时"
+    r"|(?P<minutes>" + _NUMBER + r")\s*分钟)"
+)
 _WRITE_VERBS = r"创建|安排|添加|取消|删除|保存|修改|更新|完成|记住|记下|设定|设置|调整|记录"
 _NO_WRITE_NOTE = "本轮未执行写入；写入须生成并应用草案。"
 
@@ -50,6 +55,14 @@ def _number(value):
     if value in _DIGITS:
         return _DIGITS[value]
     raise ValueError()
+
+
+def _duration_minutes(match):
+    if match.group('hours'):
+        return _number(match.group('hours')) * 60 + (_number(match.group('extra')) if match.group('extra') else 30 if match.group('tail_half') else 0)
+    if match.group('minutes'):
+        return _number(match.group('minutes'))
+    return (_number(match.group('half_hours')) if match.group('half_hours') else 0) * 60 + 30
 
 
 def _validate(value, schema):
@@ -201,7 +214,7 @@ class AgentEngine:
         match = relatives[0]
         return now.date() + timedelta(days={"今天": 0, "明天": 1, "后天": 2}[match.group()]), [(match.start(), match.end())]
 
-    def _rules(self, message, session_id):
+    def _rules(self, message, session_id, model_available=False):
         result = {"reply": "", "actions": [], "tools": [], "needs_clarification": False}
         task = re.fullmatch(r"(?:添加)?待办\s*[:：]\s*(.+)", message, re.S)
         memory = re.fullmatch(r"(?:请)?(?:帮我)?记住\s*[:：]?\s*(.+)", message, re.S)
@@ -238,7 +251,7 @@ class AgentEngine:
         day, remove = self._day(message, now)
         times = list(re.finditer(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)", message))
         chinese_times = list(re.finditer(r"(" + _NUMBER + r")点(?:(半)|(" + _NUMBER + r")分)?", message))
-        durations = list(re.finditer(r"半小时|(" + _NUMBER + r")\s*(分钟|小时)", message))
+        durations = list(_DURATION.finditer(message))
         query = bool(re.search(r"有什么|有哪些|查看|查询|看看|看下|查一下", message)) or bool(re.fullmatch(r"(?:今天|明天|后天|\d{4}-\d{2}-\d{2})的?(?:日程|安排|会议)[？?]?", message))
         if day and query and not times and not chinese_times and not durations:
             end = day + timedelta(days=1)
@@ -255,11 +268,21 @@ class AgentEngine:
                 result["reply"] = day.isoformat() + " 的日程：\n" + "\n".join(rows)
             return result
         if day and query:
+            if model_available:
+                return None
             result.update(reply="可以先问“明天有什么安排”。按小时筛选请查看日历，或启用智能对话。", needs_clarification=True)
             return result
         if day and (times or chinese_times or durations or re.search(r"安排|创建|新建|添加.*日程", message)):
-            if len(times) + len(chinese_times) != 1 or len(durations) != 1 or re.search(r"小时\s*半|\d\s*[-~～—到至]\s*\d+\s*(?:分钟|小时)", message):
-                result.update(reply="请提供一个明确的开始时间和持续时长，例如“明天15:00 评审30分钟”。", needs_clarification=True)
+            if len(times) + len(chinese_times) != 1 or len(durations) != 1 or re.search(_NUMBER + r"\s*[-~～—到至]\s*" + _NUMBER + r"\s*(?:分钟|小时)", message):
+                if model_available:
+                    return None
+                if len(times) + len(chinese_times) == 1 and not durations:
+                    question = "这项日程要安排多久？"
+                elif not times and not chinese_times and len(durations) == 1:
+                    question = "这项日程几点开始？"
+                else:
+                    question = "请确认开始时间和时长；也可以告诉我从几点到几点。"
+                result.update(reply=question, needs_clarification=True)
                 return result
             match = (times or chinese_times)[0]
             try:
@@ -308,24 +331,36 @@ class AgentEngine:
                     elif part is not None and hour == 12:
                         raise ValueError()
                 duration = durations[0]
-                minutes = 30 if duration.group() == "半小时" else _number(duration.group(1)) * (60 if duration.group(2) == "小时" else 1)
+                minutes = _duration_minutes(duration)
                 if not 0 <= hour < 24 or not 0 <= minute < 60 or not 5 <= minutes <= 1440:
                     raise ValueError()
             except ValueError:
                 result.update(reply="时间还不够明确。请使用24小时制并说明时长，例如“明天15:00 评审30分钟”。", needs_clarification=True)
                 return result
-            remove.extend([(match.start(), match.end()), (duration.start(), duration.end())])
+            duration_start = duration.start()
+            label = re.search(r"(?:时长(?:为|是)?|持续(?:时间)?(?:为|是)?|时间(?:为|是)?)\s*$", message[:duration_start])
+            if label:
+                duration_start = label.start()
+            remove.extend([(match.start(), match.end()), (duration_start, duration.end())])
             remainder = message
             for a, b in sorted(remove, reverse=True):
                 remainder = remainder[:a] + " " + remainder[b:]
             title = remainder.strip(" \t，,。.;；：:！？!?")
+            named = re.search(r"(?:名称|标题|名字)\s*(?:为|是|叫做|叫作|叫|[:：])\s*(.+)", title)
+            if named:
+                value = named.group(1).strip()
+                quoted = re.match(r'[“"「](.+?)[”"」]', value)
+                title = quoted.group(1) if quoted else re.split(r"[，,。.;；！？!?]", value, maxsplit=1)[0].strip()
             title = re.sub(r"^T\s+", "", title).strip()
-            previous = None
-            while title != previous:
-                previous = title
-                title = re.sub(r"^(?:帮我|请|给我|麻烦|在|于|的|安排|添加|创建|新建|一个|个|一场|场|预留|留|进行)\s*", "", title).strip()
-            if not title or len(title) > 200 or re.search(r"取消|删除|改期|推迟|提前", title):
-                result.update(reply="请说明日程标题，并将改期或取消单独处理。例如“明天15:00 方案评审30分钟”。", needs_clarification=True)
+            if not named:
+                previous = None
+                while title != previous:
+                    previous = title
+                    title = re.sub(r"^(?:帮我|请|给我|麻烦|在|于|的|安排|添加|创建|新建|一下|一个|个|一场|场|预留|留|进行)\s*", "", title).strip()
+            if not title or title in ('日程', '日程时间', '时间', '日程时长') or len(title) > 200 or re.search(r"取消|删除|改期|推迟|提前", title):
+                if model_available:
+                    return None
+                result.update(reply="这项日程叫什么？", needs_clarification=True)
                 return result
             # Let the core timezone validator reject nonexistent or ambiguous local times.
             start = datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute)
@@ -336,7 +371,10 @@ class AgentEngine:
             result["reply"] = "已生成 " + day.isoformat() + " " + start.strftime("%H:%M") + "–" + end.strftime("%H:%M") + " 的“" + title + "”草案。点击应用时会检查冲突并保存。"
             return result
         if (times or chinese_times or durations or re.search(r"安排|创建|新建|添加.*日程", message)) and not day:
-            result.update(reply="请明确日期、开始时间和时长，例如“明天15:00 评审30分钟”。", needs_clarification=True)
+            dates = re.findall(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)", message)
+            if model_available and not dates:
+                return None
+            result.update(reply="这项日程安排在哪一天？", needs_clarification=True)
             return result
         return None
 
@@ -475,7 +513,7 @@ class AgentEngine:
             if not compound and not read_denied:
                 result = handle(self, message, session_id, model_available=bool(model), attachment_ids=context.get("attachment_ids", []))
             if result is None and not compound:
-                result = self._rules(message, session_id)
+                result = self._rules(message, session_id, model_available=bool(model))
             if result is None:
                 if model:
                     mode = "nanobot" if context.get("model_provider") == "nanobot" else "api" if context.get("model_provider") == "api" else "ollama"
