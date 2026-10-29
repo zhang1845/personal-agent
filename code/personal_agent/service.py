@@ -357,7 +357,11 @@ class CalendarService:
         with self.lock:
             if (name == "calendar_create_event" and arguments.get("recurrence")) or (name in ("calendar_update_event","calendar_delete_event") and str(arguments.get("event_id","")).startswith("series:")):
                 return self.recurrence.mutate(name,arguments)
-            if arguments.get("scope") is not None:
+            if arguments.get("scope") == "occurrence":
+                # An explicit single occurrence also means just this ordinary event.
+                # Normalize before fingerprinting so an omitted default replays safely.
+                arguments = {key: value for key, value in arguments.items() if key != "scope"}
+            elif arguments.get("scope") is not None:
                 raise AgentError("validation_error","普通日程无需指定重复范围")
             prefs = self._preferences()
             if name == "calendar_status":

@@ -1,4 +1,4 @@
-# 我的 Agent · 个人工作台 v0.7
+# 我的 Agent · 个人工作台 v0.7.1
 
 原生日程、待办、项目资料库和个人记忆工作台。前端使用原生 HTML/CSS/JavaScript 与本地 Bulma 1.0.4，后端使用 Python、SQLite 和 nanobot Python SDK。没有 npm 构建步骤，不安装 Ollama 或本地大模型。明确指令仍可离线使用；复杂请求在你配置并启用 API 后交给真实 nanobot 工具循环。
 
@@ -65,6 +65,8 @@ python3.12 -m venv .venv
 目前未提供真实模型 Key、CalDAV 账号或外部通知地址。已验证真实解析器、nanobot SDK 和模拟网络链路；这不表示真实服务商已连接或手机已收到通知。
 
 ## 模型 API 与 Agent
+
+普通日程的修改和取消兼容模型传入的 `scope: occurrence`，与省略范围参数相同，仅处理指定日程；普通日程仍拒绝 `scope: series`。确认、最新版本校验及重复请求保护继续生效。
 
 “设置 → 模型 API”填写 API 地址、Key、准确模型名称。目前支持 OpenAI 兼容 Chat Completions，远程要求 HTTPS，本机回环可使用 HTTP。保存不会联网；“测试已保存配置”发送小请求，不带个人资料。勾选启用后，复杂请求会发送必要的对话、已保存记忆、工作方式和相关资料，费用按服务商规则计算。
 

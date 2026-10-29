@@ -18,6 +18,34 @@ class ChatSDKWorkflows(unittest.TestCase):
         self.app.api_settings.save({'base_url':'https://model.example/v1','model':'mock-workflow','enabled':True,'expected_version':1})
     def tearDown(self):self.app.close();self.temp.cleanup()
 
+    def test_sdk_cancel_ordinary_event_with_occurrence_stays_pending_until_apply(self):
+        event = self.app.calendar.call('calendar_create_event', {
+            'request_id':'cancel-regression-create','title':'取消验收',
+            'start':'2030-01-07T10:00:00+08:00','end':'2030-01-07T10:30:00+08:00'})['event']
+        requests = []
+        def provider(client, messages, tools, model):
+            requests.append(messages)
+            if len(requests) == 1:
+                return call('calendar_get_event', {'event_id':event['id']}, 'read-event')
+            if len(requests) == 2:
+                return call('calendar_delete_event', {'request_id':'model-cancel', 'event_id':event['id'],
+                    'expected_version':event['version'],'scope':'occurrence'}, 'cancel-event')
+            return {'content':'请确认取消这条普通日程。'}
+        with patch.object(APIModelClient, 'chat', new=provider):
+            value = self.app.route('POST', '/api/chat', {}, {
+                'message':'请先读取取消验收的日程，然后生成取消草案'})
+        self.assertEqual('nanobot', value['mode'])
+        self.assertEqual(1, len(value['actions']))
+        action = value['actions'][0]
+        self.assertEqual('pending', action['status'])
+        self.assertEqual('occurrence', action['arguments']['scope'])
+        self.assertEqual(event, self.app.calendar.call('calendar_get_event', {'event_id':event['id']})['event'])
+        first = self.app.apply(action['id'])
+        self.assertEqual('applied', first['action']['status'])
+        self.assertTrue(first['result']['deleted'])
+        self.assertEqual(first, self.app.apply(action['id']))
+        self.assertEqual([], self.app.calendar.call('calendar_list_events', {'start':'2030-01-07','end':'2030-01-08'})['events'])
+
     def test_sdk_reads_user_link_and_proposes_original_preview_without_auto_save(self):
         html=('<html><head><title>来源原文</title></head><body><article>'+''.join('<p>项目资料需要保留原文和来源，后续检索可以引用。</p>' for _ in range(20))+'</article></body></html>').encode()
         self.app.importer.fetcher=lambda url:(html,url)

@@ -27,7 +27,7 @@ EVENT_FIELDS = {
     "reminder_minutes": {"type": ["integer", "null"], "minimum": 0, "description": "仅真实后端声明支持时可用；本地开发模式不发送提醒。"},
 }
 RECURRENCE = _object({'frequency':{'type':'string','enum':['daily','weekly','monthly']},'interval':{'type':'integer','minimum':1,'maximum':12},'count':{'type':'integer','minimum':1,'maximum':366},'until':TIME,'weekdays':{'type':'array','items':{'type':'integer','minimum':0,'maximum':6},'minItems':1,'uniqueItems':True}},['frequency'])
-SCOPE = {'type':'string','enum':['occurrence','series'],'description':'默认仅本次。整个系列须用户明确要求；将清除原例外。'}
+SCOPE = {'type':'string','enum':['occurrence','series'],'description':'默认仅本次。普通日程省略此字段，或使用 occurrence 只处理该条；series 仅适用于用户明确要求的重复系列，将清除原例外。'}
 
 
 def _tool(name, description, properties=None, required=None, read=True, destructive=False):
