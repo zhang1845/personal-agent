@@ -1,6 +1,8 @@
 name: daynest
 services:
   daynest:
+    image: daynest:local
+    pull_policy: never
     build:
       context: ..
     env_file: ../private/cloud.env
