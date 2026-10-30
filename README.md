@@ -1,4 +1,4 @@
-# Daynest · AI 个人工作台 v0.9.0
+# Daynest · AI 个人工作台 v0.10.0
 
 Daynest 将日程、待办、项目资料和个人记忆集中到一个支持自然语言交互的个人工作台。前端使用原生 HTML/CSS/JavaScript 与本地 Bulma 1.0.4，后端使用 Python、SQLite 和 nanobot Python SDK。没有 npm 构建步骤，不安装 Ollama 或本地大模型。明确指令仍可离线使用；复杂请求在你配置并启用 API 后交给真实 nanobot 工具循环。
 
@@ -32,6 +32,12 @@ python3.12 -m venv .venv
 ```sh
 .venv/bin/python -B code/run.py web --port 8788 --data-dir /private/tmp/daynest-test
 ```
+
+## v0.10 CloudBase 按需版
+
+新增 CloudBase PostgreSQL HTTPS 持久化适配，保存九个数据库和三份私密设置；原有业务 SQL 继续在内存 SQLite 执行，事务提交后同步保存压缩快照。版本校验和全局请求租约保护并发操作，云端故障不回退空库。此模式适合个人小数据，限制及部署状态见 [CloudBase 部署说明](deploy/tencent-cloudbase.md)。
+
+按需版空闲可休眠，只有使用工作台时检查提醒，错过发送窗口不补发。默认尝试平台注入的临时服务身份，不需要将模型 Key 放入源码；真实云端身份、读写及重启仍须在目标环境验收。本机 Windows/macOS 继续使用原有 SQLite 和独立启动入口。
 
 ## v0.9 可选云端入口
 

@@ -72,3 +72,5 @@ Windows 验收应包含首次依赖安装、双击启停、中文路径、日程
 ## 可选云端版
 
 本机入口仍无需登录或额外依赖。新增的单用户云端网关使用跨平台 Waitress，依赖在 `requirements-cloud.txt`；配置生成、HTTPS 代理和持久化磁盘步骤见 [完整在线版部署](deploy/README.md)。本机数据和 API Key 不会自动上传。
+
+CloudBase 按需版使用同一个 HTTPS 地址，可从 Windows 的 Edge / Chrome 登录；不需要在 Windows 电脑安装云数据库、Docker 或本地模型。它与本机版的数据独立，空闲休眠时不能准时提醒，详见 [CloudBase 部署说明](deploy/tencent-cloudbase.md)。本机 CMD 入口继续使用 SQLite，不启用云存储或读取云端身份。

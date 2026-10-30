@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 import re
 import sqlite3
+from .cloudbase_store import connect as open_database
 import uuid
 
 from .errors import AgentError
@@ -58,7 +59,7 @@ class PersonalStore:
 
     @contextmanager
     def connection(self):
-        conn = sqlite3.connect(str(self.path), timeout=10)
+        conn = open_database(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("BEGIN IMMEDIATE")

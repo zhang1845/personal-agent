@@ -3,6 +3,7 @@ import argparse
 import os
 import signal
 import sys
+import threading
 
 from cloud_admin import read_config
 from personal_agent.cloud import CloudConfig, CloudGateway
@@ -21,12 +22,26 @@ def main():
         values = read_config(args.env_file) if args.env_file else {}
         values.update(os.environ)
         config = CloudConfig.from_env(values)
+        storage = values.get('DAYNEST_STORAGE', 'sqlite')
+        if storage not in ('sqlite', 'cloudbase'):
+            raise ValueError('DAYNEST_STORAGE 仅支持 sqlite 或 cloudbase')
+        remote = None
+        if storage == 'cloudbase':
+            from personal_agent.cloudbase_store import CloudBaseClient
+            env_id = values.get('DAYNEST_CLOUDBASE_ENV', '')
+            backend_key = values.get('DAYNEST_CLOUDBASE_KEY', '')
+            if backend_key:
+                remote = CloudBaseClient(env_id, backend_key)
+            else:
+                from personal_agent.cloudbase_identity import CloudBaseIdentity
+                identity = CloudBaseIdentity(env_id)
+                remote = CloudBaseClient(env_id, bearer_provider=identity.bearer)
         if not 1 <= args.port <= 65535:
             raise ValueError('端口须为1至65535')
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     if args.check:
-        print('Daynest 云端配置校验通过。需要持久化存储及 HTTPS 反向代理。')
+        print('Daynest 云端配置格式校验通过；尚未连接数据库或启动服务。')
         return 0
     try:
         from waitress import create_server
@@ -34,13 +49,27 @@ def main():
         parser.error('请先安装 requirements-cloud.txt；本机版无需此依赖')
     if os.name != 'nt':
         os.umask(0o077)
-    gateway = CloudGateway(config)
+    if remote is None:
+        gateway = CloudGateway(config)
+    else:
+        from personal_agent.cloudbase_gateway import CloudBaseGateway
+        gateway = CloudBaseGateway(config, remote)
     server = None
     previous = None
+    stopped = threading.Event()
     try:
         server = create_server(gateway, host=args.host, port=args.port, threads=4,
                                max_request_body_size=12*1024*1024, channel_timeout=300,
                                expose_tracebacks=False, clear_untrusted_proxy_headers=True)
+        if remote is not None:
+            def abort_unhealthy_worker():
+                # A timed-out loopback handler can still be executing. Exiting
+                # the whole process prevents it from resuming after takeover.
+                # Keep the remote lease; expiry is the conservative handover.
+                while not stopped.wait(.5):
+                    if gateway.faulted:
+                        os._exit(75)
+            threading.Thread(target=abort_unhealthy_worker, daemon=True).start()
         def shutdown(*_):
             raise KeyboardInterrupt()
         previous = signal.signal(signal.SIGTERM, shutdown)
@@ -49,6 +78,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        stopped.set()
         if previous is not None:
             signal.signal(signal.SIGTERM, previous)
         if server is not None:

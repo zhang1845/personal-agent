@@ -23,6 +23,7 @@ import time
 from urllib.parse import parse_qs, quote, urlsplit
 
 from .webapp import make_server, PROJECT_ROOT
+from .cloudbase_store import connect as open_database
 
 COOKIE = '__Host-daynest'
 SESSION_SECONDS = 8 * 60 * 60
@@ -95,7 +96,7 @@ class AuthStore:
 
     @contextmanager
     def connection(self):
-        c = sqlite3.connect(self.path, timeout=10)
+        c = open_database(self.path, timeout=10)
         try:
             with c:
                 yield c
@@ -206,6 +207,15 @@ class CloudGateway:
             # No exception text, credentials, input bodies or traceback in responses.
             return self.respond(start, 500, {'error': {'code': 'internal_error', 'message': '请求未完成，请稍后重试。'}})
 
+    def authenticated_request(self, path, method):
+        """Optional hosting policy; native persistent-disk mode needs no hook."""
+
+    def proxy_failed(self):
+        """Optional hosting policy after an uncertain loopback request."""
+
+    def deployment_info(self):
+        return {'mode': 'cloud'}
+
     def dispatch(self, environ, start):
         path = environ.get('PATH_INFO', '/')
         method = environ.get('REQUEST_METHOD', 'GET')
@@ -248,6 +258,7 @@ class CloudGateway:
             if path.startswith('/api/'):
                 return self.respond(start, 401, {'error': {'code': 'authentication_required', 'message': '请先登录 Daynest'}})
             return self.respond(start, 303, b'', extra=[('Location', '/login')])
+        self.authenticated_request(path, method)
         if path == '/logout':
             if method != 'POST':
                 return self.respond(start, 405, b'')
@@ -283,8 +294,11 @@ class CloudGateway:
             extra = [('Content-Disposition', response.getheader('Content-Disposition'))] if response.getheader('Content-Disposition') else []
             if path == '/api/bootstrap' and response.status == 200:
                 value = json.loads(content)
-                value['deployment'] = {'mode': 'cloud'}
+                value['deployment'] = self.deployment_info()
                 content = json.dumps(value, ensure_ascii=False).encode('utf-8')
             return self.respond(start, response.status, content, kind, extra)
+        except (OSError, TimeoutError):
+            self.proxy_failed()
+            raise
         finally:
             connection.close()

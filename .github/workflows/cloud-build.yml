@@ -52,8 +52,12 @@ jobs:
           "from pathlib import Path; assert not Path('/app/output').exists();
           assert not Path('/app/private').exists(); assert not Path('/app/.env').exists();
           from personal_agent.cloud import CloudConfig"
-      - name: Test cloud login and workbench inside Linux image
-        run: docker run --rm daynest:local python -X utf8 -B -m unittest discover -s code/tests -p test_cloud.py -q
+      - name: Test cloud login and CloudBase persistence inside Linux image
+        # Includes test_cloud.py, test_cloudbase_store.py,
+        # test_cloudbase_config.py, test_cloudbase_identity.py and
+        # test_cloudbase_gateway.py; offline fake identity/storage only.
+        # Does not prove that CloudRun injects credentials or accepts the PG role.
+        run: docker run --rm daynest:local python -X utf8 -B -m unittest discover -s code/tests -p 'test_cloud*.py' -q
       - name: Verify actual Compose login and persistent volume
         run: >-
           docker compose --env-file .env -f deploy/compose.yml run --rm --no-deps --entrypoint python daynest -c

@@ -9,7 +9,8 @@ import sys
 from personal_agent.cloud import CloudConfig, password_hash
 from personal_agent.platform_utils import configure_stdio, private_file_permissions
 
-KEYS = {'DAYNEST_PUBLIC_URL', 'DAYNEST_DATA_DIR', 'DAYNEST_PASSWORD_HASH'}
+KEYS = {'DAYNEST_PUBLIC_URL', 'DAYNEST_DATA_DIR', 'DAYNEST_PASSWORD_HASH',
+        'DAYNEST_STORAGE', 'DAYNEST_CLOUDBASE_ENV', 'DAYNEST_CLOUDBASE_KEY'}
 
 
 def read_config(path):

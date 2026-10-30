@@ -13,6 +13,9 @@ from urllib.request import Request, ProxyHandler, build_opener
 
 from .errors import AgentError
 from .ollama_client import _NoRedirect
+from .cloudbase_store import remote_document, SnapshotConflict
+
+_NO_BASELINE = object()
 
 
 def timestamp():
@@ -61,23 +64,52 @@ class APISettings:
     def __init__(self, path):
         self.path = Path(path)
         self.lock = threading.RLock()
+        self._remote_revision = _NO_BASELINE
+        try:
+            self._remote = remote_document(self.path)
+        except Exception:
+            raise AgentError('storage_unavailable', 'API 配置暂不可用') from None
 
     def _read(self):
-        if not self.path.exists():
-            return {'base_url':'', 'model':'', 'api_key':'', 'enabled':False, 'version':1, 'last_test':None}
+        self._remote_revision = _NO_BASELINE
         try:
-            if self.path.is_symlink() or self.path.stat().st_size > 16384: raise ValueError()
-            data = json.loads(self.path.read_text(encoding='utf-8'))
+            if self._remote is not None:
+                revision, data = self._remote.read()
+                if type(revision) is not int or revision < 0: raise ValueError()
+                if data is None:
+                    data = {'base_url':'', 'model':'', 'api_key':'', 'enabled':False, 'version':1, 'last_test':None}
+                if len(json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')) > 16384: raise ValueError()
+            else:
+                if not self.path.exists():
+                    return {'base_url':'', 'model':'', 'api_key':'', 'enabled':False, 'version':1, 'last_test':None}
+                if self.path.is_symlink() or self.path.stat().st_size > 16384: raise ValueError()
+                data = json.loads(self.path.read_text(encoding='utf-8'))
             if not isinstance(data, dict) or type(data.get('version')) is not int or data['version'] < 1 or type(data.get('enabled')) is not bool: raise ValueError()
             data['base_url'] = base_url(data.get('base_url', ''))
             data['model'] = model_name(data.get('model', ''))
             data['api_key'] = api_key(data.get('api_key', ''))
             self._complete(data)
+            if self._remote is not None:
+                self._remote_revision = revision
             return data
-        except (OSError, ValueError, TypeError, AgentError):
-            raise AgentError('storage_unavailable', 'API 配置无法读取；未尝试连接模型，请检查本机配置文件') from None
+        except Exception:
+            raise AgentError('storage_unavailable', 'API 配置无法读取；未尝试连接模型') from None
 
     def _write(self, data):
+        if self._remote is not None:
+            # Business version does not change in record_test. CAS must use the
+            # remote revision from this operation's read, without refreshing it.
+            revision = self._remote_revision
+            self._remote_revision = _NO_BASELINE
+            if revision is _NO_BASELINE:
+                raise AgentError('storage_unavailable', 'API 配置须重新读取后保存')
+            try:
+                self._remote.compare_swap(revision, data)
+            except SnapshotConflict:
+                raise AgentError('version_conflict', 'API 配置已变化，请重新加载') from None
+            except Exception:
+                raise AgentError('storage_unavailable', 'API 配置保存结果未确认，请刷新核对') from None
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
@@ -89,7 +121,7 @@ class APISettings:
                 stream.flush(); os.fsync(stream.fileno())
             os.replace(temporary, str(self.path))
         except OSError:
-            raise AgentError('storage_unavailable', 'API 配置未能保存，请检查本机目录权限') from None
+            raise AgentError('storage_unavailable', 'API 配置未能保存，请核对存储状态') from None
         finally:
             if temporary and os.path.exists(temporary): os.unlink(temporary)
 

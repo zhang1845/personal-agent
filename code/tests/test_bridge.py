@@ -172,7 +172,11 @@ class BridgeTests(unittest.TestCase):
         for mode in ("timeout", "disconnect", "invalid_write", "tool_error", "stdout_log"):
             with self.subTest(mode=mode):
                 self.log.unlink(missing_ok=True)
-                bridge=self.make(mode,writes_enabled=True,timeout_seconds=.15)
+                bridge=self.make(mode,writes_enabled=True,timeout_seconds=1)
+                # Test an ambiguous result after tools/call, without making
+                # interpreter cold-start speed part of the 150 ms deadline.
+                bridge._ensure_started()
+                bridge.timeout=.15
                 self.assert_error("unknown_outcome", lambda: bridge.create_event({}, "request-1"))
                 calls=[json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
                 self.assertEqual(sum(c["method"]=="tools/call" for c in calls),1)

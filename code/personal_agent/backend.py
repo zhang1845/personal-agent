@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from .cloudbase_store import connect as open_database
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -35,7 +36,7 @@ class SQLiteBackend:
 
     @contextmanager
     def connection(self, immediate=False):
-        conn = sqlite3.connect(str(self.path), timeout=15, isolation_level=None)
+        conn = open_database(self.path, timeout=15, isolation_level=None)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA busy_timeout=15000")
