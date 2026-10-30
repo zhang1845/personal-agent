@@ -47,6 +47,8 @@ jobs:
       - name: Frontend logic tests
         shell: bash
         run: node --test code/tests/*.test.cjs
+      - name: Offline retrieval benchmark
+        run: python -X utf8 -B code/quality_benchmark.py --output output/retrieval-benchmark.json
       - name: Build source release
         run: python -X utf8 -B code/package_release.py
       - name: Preserve failure diagnostics

@@ -123,23 +123,18 @@ class KnowledgeStore(PersonalStore):
             if not c.execute('DELETE FROM sources WHERE id=? AND version=?',(source_id,expected_version)).rowcount:raise AgentError('version_conflict','资料已变化或不存在')
         return {'deleted':True}
 
-    def search(self, query='', project_id=None, limit=30):
-        if not isinstance(query,str) or len(query)>300:raise AgentError('validation_error','搜索内容最多 300 字')
-        if type(limit) is not int or not 1<=limit<=100:raise AgentError('validation_error','返回数量须为 1 至 100')
+    def corpus(self, project_id=None):
         if project_id:self.project(project_id)
         with self.connection() as c:
             sql='SELECT s.*,p.name AS project_name FROM sources s LEFT JOIN projects p ON p.id=s.project_id'
-            rows=[dict(r) for r in c.execute(sql+(' WHERE s.project_id=?' if project_id else '')+' ORDER BY s.updated_at DESC,s.id',(project_id,) if project_id else ())]
-        keys=terms(query);ranked=[]
-        for row in rows:
-            title=row['title'].casefold();body=row['content'].casefold();thought=row['reflection'].casefold()
-            score=sum(6*(k in title)+2*(k in body)+(k in thought) for k in keys)
-            if query.strip() and not keys:continue
-            if keys and not score:continue
-            row['excerpt']=excerpt(row['content'],query);row['reflection_excerpt']=excerpt(row['reflection'],query,220)
-            del row['content'];del row['reflection'];row['score']=score;ranked.append(row)
-        ranked.sort(key=lambda r:-r['score']) # stable updated_at order for ties
-        return {'sources':ranked[:limit],'total':len(ranked),'query':query,'project_id':project_id,'method':'keyword'}
+            return [dict(r) for r in c.execute(sql+(' WHERE s.project_id=?' if project_id else '')+' ORDER BY s.updated_at DESC,s.id',(project_id,) if project_id else ())]
+
+    def search(self, query='', project_id=None, limit=30):
+        if not isinstance(query,str) or len(query)>300:raise AgentError('validation_error','搜索内容最多 300 字')
+        if type(limit) is not int or not 1<=limit<=100:raise AgentError('validation_error','返回数量须为 1 至 100')
+        from .retrieval import rank, REVISION
+        ranked,total=rank(self.corpus(project_id),query,limit)
+        return {'sources':ranked,'total':total,'query':query,'project_id':project_id,'method':REVISION}
 
     def get_workstyle(self):
         with self.connection() as c:return dict(c.execute('SELECT content,version FROM workstyle WHERE id=1').fetchone())

@@ -537,3 +537,34 @@ dialog .field-help { margin-top: -6px; }
 .caldav-grid { margin-top:16px; }
 @media(max-width:1100px) { .integration-grid { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:760px) { .integration-row { flex-wrap:wrap;gap:8px; }.integration-row-main { flex-basis:100%; }.library-heading-actions { width:100%; }.agent-live-status{padding:10px 16px;} }
+
+/* Quality workbench: lists and controls reuse the existing theme. */
+.quality-columns { align-items:start; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+.quality-columns > *, .quality-evaluation { min-width:0; }
+.quality-columns > .surface { margin-bottom:0; }
+.quality-evaluation { margin-top:20px; }
+.quality-row { padding:14px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+.quality-row:first-child { border-top:0; }
+.quality-row summary { cursor:pointer; font-weight:500; scroll-margin-top:80px; }
+.quality-row h3 { font-size:15px; font-weight:600; }
+.quality-row p { margin:8px 0; }
+.quality-actions,.answer-feedback { display:flex; gap:8px; flex-wrap:wrap; }
+.answer-feedback { margin-top:6px; }
+.answer-feedback .button { padding-inline:6px; color:var(--muted); }
+.quality-question,.quality-answer,.citation-excerpt { white-space:pre-wrap; overflow-wrap:anywhere; }
+.quality-answer { max-height:260px; overflow:auto; color:var(--muted); }
+.quality-form .label { margin-top:12px; font-size:13px; }
+.quality-form .label textarea,.quality-form .label select { margin-top:6px; font-weight:400; }
+.quality-form select[multiple] { height:9rem; padding:8px; }
+.quality-form select[multiple] option { padding:5px; }
+.quality-run-form { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:14px 0; }
+.quality-run-form .label { margin:0; }
+.quality-run-form .input { width:76px; }
+.quality-table-wrap { overflow-x:auto; margin-top:16px; }
+.quality-table-wrap .table { font-size:13px; }
+.quality-table-wrap th,.quality-table-wrap td { white-space:nowrap; }
+.citation-excerpt { border-left:2px solid var(--line); padding:12px 16px; margin:16px 0; max-height:50vh; overflow:auto; }
+@media(max-width:1100px) { .quality-columns { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:760px) { .quality-run-form { align-items:stretch; } .quality-run-form .label { width:100%; } .quality-row .quality-actions { gap:4px; } }
+
+@media(max-width:760px) { .quality-nav-label { min-width:0; white-space:normal; line-height:1.15; overflow-wrap:anywhere; } }

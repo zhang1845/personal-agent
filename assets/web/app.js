@@ -27,10 +27,11 @@
     history: '<path d="M3 4v5h5"/><path d="M3.5 9a9 9 0 1 1 1.4 9M12 7v5l3 2"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/>',
   };
-  const state = { token: "", status: null, prefs: {}, date: "", view: "overview", chatCollapsed: false, calendarMode: "month", calendarLoading: false, calendarError: null, overview: {}, calendarEvents: [], tasks: [], deletedTasks: [], taskFilter: "open", taskSort: "due", editingTask: null, taskForSlots: null, taskSlotRequest: 0, planningTask: null, memories: [], sessions: [], sessionId: null, messages: [], actions: [], models: [], model: "", modelAvailable: false, chatProjectId: null, chatBusy: false, sessionAttachments: [], editingEvent: null, eventOriginal: null, eventRequest: null, confirm: null, dataRequest: 0, calendarRequest: 0, sessionRequest: 0 };
-  const VIEW_NAMES = { overview: "总览", calendar: "日程", tasks: "待办", memories: "记忆", knowledge: "资料库", automation: "自动化", settings: "设置" };
+  const state = { token: "", status: null, prefs: {}, date: "", view: "overview", chatCollapsed: false, calendarMode: "month", calendarLoading: false, calendarError: null, overview: {}, calendarEvents: [], tasks: [], deletedTasks: [], taskFilter: "open", taskSort: "due", editingTask: null, taskForSlots: null, taskSlotRequest: 0, planningTask: null, memories: [], sessions: [], sessionId: null, messages: [], feedbackByMessage: {}, actions: [], models: [], model: "", modelAvailable: false, chatProjectId: null, chatBusy: false, sessionAttachments: [], editingEvent: null, eventOriginal: null, eventRequest: null, confirm: null, dataRequest: 0, calendarRequest: 0, sessionRequest: 0 };
+  const VIEW_NAMES = { overview: "总览", calendar: "日程", tasks: "待办", memories: "记忆", knowledge: "资料库", automation: "自动化", quality: "评测与反馈", settings: "设置" };
   let toastTimer;
   let knowledgeUI;
+  let qualityUI;
   let integrationsUI;
   let apiConfig = null;
   let apiFormDirty = false;
@@ -121,6 +122,7 @@
     $("breadcrumb-current").textContent = VIEW_NAMES[view];
     if (changed) window.scrollTo({ top: 0, behavior: "instant" });
     if (view === "automation" && integrationsUI) integrationsUI.load().catch((error) => showError("integration-error", error));
+    if (view === "quality" && qualityUI) qualityUI.load().catch((error) => showError("quality-error", error));
     if (view === "knowledge" && knowledgeUI) knowledgeUI.load().catch((error) => showError("knowledge-error", error));
     if (view === "calendar") loadCalendar().catch((error) => showError("global-error", error));
   }
@@ -659,8 +661,9 @@
     else state.messages.forEach((message) => { const row = el("div", `chat-message ${message.role === "user" ? "user" : "assistant"}`), label = el("div", "message-label", message.role === "user" ? "我" : "助手"); row.append(label, el("div", "message-bubble", message.content || ""));
       if (message.sources && message.sources.length) {
         const refs = el("div", "answer-sources"); refs.append(el("span", "muted", "参考资料 · 引用时的内容"));
-        message.sources.forEach((source) => { const link = el("button", "source-reference", source.title); link.type = "button"; link.addEventListener("click", () => knowledgeUI.openSource(source.id)); refs.append(link); }); row.append(refs);
+        message.sources.forEach((source) => { const link = el("button", "source-reference", source.title); link.type = "button"; link.addEventListener("click", () => qualityUI.citation(source)); refs.append(link); }); row.append(refs);
       }
+      if (message.role === "assistant" && message.id && qualityUI) row.append(qualityUI.answerControls(message,state.sessionId,state.feedbackByMessage[message.id]));
       stream.append(row); });
     state.actions.forEach((action) => stream.append(renderAction(action)));
     if (state.chatBusy) { const pending = el("div", "chat-message pending"); pending.append(el("div", "message-label", "助手"), el("div", "message-bubble", "正在处理…")); stream.append(pending); }
@@ -675,7 +678,7 @@
       const body = { message, project_id: state.chatProjectId }; if (state.sessionId) body.session_id = state.sessionId; if (state.model) body.model = state.model; if (attachments.length) body.attachment_ids = attachments.map(item=>item.id);
       const result = await api("/api/chat", { method: "POST", body }); state.sessionId = result.session_id;
       state.sessionAttachments = Array.isArray(result.attachments) ? result.attachments : ChatFiles.merge(state.sessionAttachments, attachments);
-      state.messages.push({ role: "assistant", content: result.reply || "已处理这条请求。", sources: result.sources || [] }); state.actions.push(...(result.actions || []));
+      state.messages.push({ id:result.message_id, role: "assistant", content: result.reply || "已处理这条请求。", sources: result.sources || [] }); state.actions.push(...(result.actions || []));
       chatDraft.reset(); renderChatDraft();
       try { await loadSessions(); } catch (error) { toast("消息已处理，对话列表暂未刷新", true); }
     } catch (error) { state.messages = previous; input.value = original; showError("chat-error", error); }
@@ -686,7 +689,7 @@
     const request = ++state.sessionRequest;
     if (value !== state.sessionId) { resetChatDraft(); state.sessionAttachments=[]; previewRequest++; if ($("chat-preview-dialog").open) $("chat-preview-dialog").close(); }
     if (!value) { state.sessionId = null; state.messages = []; state.actions = []; renderChat(); return; }
-    const result = await api(`/api/sessions/${encodeURIComponent(value)}`); if (request !== state.sessionRequest) return; state.sessionId = result.id || value; state.chatProjectId = result.project_id || null; $("chat-project").value = state.chatProjectId || ""; state.messages = result.messages || []; state.actions = result.actions || []; state.sessionAttachments = result.attachments || []; renderChat();
+    const result = await api(`/api/sessions/${encodeURIComponent(value)}`); if (request !== state.sessionRequest) return; state.sessionId = result.id || value; state.chatProjectId = result.project_id || null; $("chat-project").value = state.chatProjectId || ""; state.messages = result.messages || []; state.feedbackByMessage = Object.fromEntries((result.feedback || []).map(f=>[f.message_id,f])); state.actions = result.actions || []; state.sessionAttachments = result.attachments || []; renderChat();
   }
   function openEvent(event = null, suggested = null, task = null) {
     state.planningTask = task; $("event-title").readOnly = Boolean(task); $("event-all-day").disabled = Boolean(task); $("event-task-note").hidden = !task;
@@ -846,6 +849,10 @@
         onAsk(projectId, query) { if (state.chatBusy || chatDraft.uploading) { toast("请等待当前对话完成"); return; } resetChatDraft(); state.sessionAttachments=[]; state.sessionId = null; state.sessionRequest++; state.messages = []; state.actions = []; state.chatProjectId = projectId; $("session-select").value = ""; $("chat-project").value = projectId || ""; renderChat(); setChatCollapsed(false); $("chat-input").value = query; $("chat-input").focus(); }
       }); knowledgeUI.bind(); await knowledgeUI.load();
       integrationsUI = new IntegrationsUI({api,el,busy,showError,toast,confirmOperation,timezone,today:()=>dateKey(),addDays,refreshData:loadData,onRuntime(runtime,caldav){state.runtimeInfo=runtime;state.caldavSettings=caldav;renderStatus();setChatMode();}});
+      qualityUI = new QualityUI({api,el,busy,showError,toast,openSource:id=>knowledgeUI.openSource(id),
+        onFeedback(record){if(state.sessionId===record.session_id){state.feedbackByMessage[record.message_id]=record;renderChat();}if(state.view==="quality")qualityUI.load().catch(error=>showError("quality-error",error));},
+        async onOpenSession(id){try{await selectSession(id);setChatCollapsed(false);}catch(error){showError("quality-error",error);}}
+      }); qualityUI.bind();
       integrationsUI.bind(); await integrationsUI.load(); setDate(dateKey(state.status && state.status.current_time || new Date())); renderStatus(); renderPreferences(); await loadData(); const requestedView = location.hash.slice(1); if (VIEW_NAMES[requestedView]) setView(requestedView); await Promise.allSettled([loadModels(), loadSessions()]); }
     catch (error) { showError("global-error", error); $("backend-label").textContent = "工作台暂不可用"; $("backend-note").textContent = "请重新启动工作台后刷新页面。"; }
   }

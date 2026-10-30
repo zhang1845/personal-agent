@@ -70,9 +70,16 @@ class Application:
         from .chat_integrations import ChatIntegrations
         self.chat_integrations = ChatIntegrations(data_dir, self.knowledge, self.importer, self.automations, self.caldav, self.calendar, self.store)
         self.engine.integrations = self.chat_integrations
+        from .quality import QualityStore
+        self.quality = QualityStore(data_dir, self.store, self.knowledge)
         self.token = secrets.token_urlsafe(32)
         self.action_lock = threading.RLock()
         self.chat_lock = threading.RLock()
+
+    def chat_result(self, result):
+        if result.get('message_id'):
+            self.quality.record_run(result['message_id'], result.get('run_id'))
+        return result
 
     def close(self):
         self.calendar.close()
@@ -205,6 +212,8 @@ class Application:
 
     def route(self, method, path, query, body):
         cal, store = self.calendar, self.store
+        if path == '/api/quality' or path.startswith('/api/quality/'):
+            return self.quality.route(method,path,query,body)
         if path == "/api/chat/attachments" and method == "POST":
             fields(body, {"filename","data","session_id","project_id"}, {"filename","data","session_id"})
             fields(query, set())
@@ -340,6 +349,7 @@ class Application:
             session = store.get_session(parts[2])
             session.update(messages=store.list_messages(parts[2], 500), actions=store.list_actions(parts[2]), project_id=self.knowledge.session_project(parts[2]))
             session["attachments"] = self.chat_integrations.list_attachments(parts[2], session["project_id"])
+            session['feedback'] = [f for f in self.quality.rows('feedback') if f['session_id']==parts[2]]
             for message in session["messages"]:
                 message["sources"] = self.knowledge.answer_sources(message["id"])
             return session
@@ -364,11 +374,11 @@ class Application:
                     previous = self.engine.model_client
                     self.engine.model_client = APIModelClient(config)
                     try:
-                        return self.engine.respond(body["message"], session_id=body.get("session_id"), model=config["model"], model_provider="nanobot" if self.engine.__class__.__name__=="NanobotEngine" else "api", **extra)
+                        return self.chat_result(self.engine.respond(body["message"], session_id=body.get("session_id"), model=config["model"], model_provider="nanobot" if self.engine.__class__.__name__=="NanobotEngine" else "api", **extra))
                     finally:
                         self.engine.model_client = previous
                 model = checked_model(body.get("model", ""))
-                return self.engine.respond(body["message"], session_id=body.get("session_id"), model=model or None, **extra)
+                return self.chat_result(self.engine.respond(body["message"], session_id=body.get("session_id"), model=model or None, **extra))
         if len(parts) == 4 and parts[:2] == ["api", "actions"] and parts[3] == "apply" and method == "POST":
             fields(body, {"confirm_truncated"})
             if "confirm_truncated" in body and type(body["confirm_truncated"]) is not bool:
@@ -478,7 +488,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise AgentError("validation_error", "不允许重复参数")
             query = {k: v[0] for k, v in values.items()}
             assets = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
-                      "/chat.js": ("chat.js", "text/javascript; charset=utf-8"), "/calendar.js": ("calendar.js", "text/javascript; charset=utf-8"), "/tasks.js": ("tasks.js", "text/javascript; charset=utf-8"), "/knowledge.js": ("knowledge.js", "text/javascript; charset=utf-8"), "/integrations.js": ("integrations.js", "text/javascript; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+                      "/chat.js": ("chat.js", "text/javascript; charset=utf-8"), "/quality.js": ("quality.js", "text/javascript; charset=utf-8"), "/calendar.js": ("calendar.js", "text/javascript; charset=utf-8"), "/tasks.js": ("tasks.js", "text/javascript; charset=utf-8"), "/knowledge.js": ("knowledge.js", "text/javascript; charset=utf-8"), "/integrations.js": ("integrations.js", "text/javascript; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8"),
                       "/brand.css": ("brand.css", "text/css; charset=utf-8"),
                       "/vendor/Geist-variable.woff2": ("vendor/Geist-variable.woff2", "font/woff2"),
                       "/vendor/bulma-1.0.4.min.css": ("vendor/bulma-1.0.4.min.css", "text/css; charset=utf-8")}
@@ -492,7 +502,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_data(200, result)
         except AgentError as exc:
-            status = 404 if exc.code == "not_found" else 409 if exc.code in ("conflict", "version_conflict", "request_id_conflict", "action_unavailable", "stale_version") else 503 if exc.code in ("backend_unavailable", "model_unavailable", "unknown_result", "write_outcome_unknown", "unknown_outcome") else 400
+            status = 404 if exc.code == "not_found" else 409 if exc.code in ("conflict", "version_conflict", "request_id_conflict", "action_unavailable", "stale_version", "case_needs_review") else 503 if exc.code in ("backend_unavailable", "model_unavailable", "unknown_result", "write_outcome_unknown", "unknown_outcome") else 400
             self.send_data(status, {"error": exc.as_dict()})
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             return

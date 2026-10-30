@@ -42,7 +42,7 @@ class KnowledgeTests(unittest.TestCase):
 
     def test_empty_search_lists_sources_without_invented_summary(self):
         self.source();result=self.library.search()
-        self.assertEqual('keyword',result['method']);self.assertNotIn('summary',result)
+        self.assertEqual('chunks-bm25-v1',result['method']);self.assertNotIn('summary',result)
         self.assertIn('原文应保留出处',result['sources'][0]['excerpt'])
 
     def test_update_requires_version_and_has_no_partial_mutation(self):

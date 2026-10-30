@@ -5,6 +5,7 @@ import json
 from unittest.mock import patch
 import unittest
 from personal_agent.errors import AgentError
+from personal_agent.timeutils import zone
 from personal_agent.nanobot_engine import NanobotEngine
 import test_webapp as web_helpers
 
@@ -140,15 +141,24 @@ class ChatWorkflowTests(unittest.TestCase):
         self.assertEqual(409,self.apply(weekly)[0]);self.assertEqual(1,len(self.server.application.automations.jobs()))
 
     def test_reschedule_free_slots_preferences_and_task_completion_without_model(self):
-        value=self.chat('明天15:00 方案评审30分钟');self.assertEqual(200,self.apply(value['actions'][0])[0])
-        value=self.chat('把明天的方案评审改到16:00');action=value['actions'][0]
-        self.assertEqual('calendar_update_event',action['tool']);self.assertEqual(200,self.apply(action)[0])
-        self.assertIn('16:00',self.chat('明天有什么安排')['reply'])
-        self.assertIn('可选空闲时间',self.chat('查找明天30分钟的空闲时间')['reply'])
-        pref=self.chat('把工作时段设为09:00至18:00');self.assertEqual(200,self.apply(pref['actions'][0])[0])
-        task=self.chat('待办：整理会议纪要')['actions'][0];self.assertEqual(200,self.apply(task)[0])
-        complete=self.chat('完成待办：整理会议纪要')['actions'][0];self.assertEqual(200,self.apply(complete)[0])
-        self.assertTrue(self.server.application.store.list_tasks()[0]['completed'])
+        # Freeze a Monday: the next day must be a workday on every CI run.
+        tz=zone("Asia/Shanghai")
+        with patch.object(self.server.application.engine,"_now",return_value=(datetime(2030,1,7,9,tzinfo=tz),tz)):
+            value=self.chat('明天15:00 方案评审30分钟');self.assertEqual(200,self.apply(value['actions'][0])[0])
+            value=self.chat('把明天的方案评审改到16:00');action=value['actions'][0]
+            self.assertEqual('calendar_update_event',action['tool']);self.assertEqual(200,self.apply(action)[0])
+            self.assertIn('16:00',self.chat('明天有什么安排')['reply'])
+            self.assertIn('可选空闲时间',self.chat('查找明天30分钟的空闲时间')['reply'])
+            pref=self.chat('把工作时段设为09:00至18:00');self.assertEqual(200,self.apply(pref['actions'][0])[0])
+            task=self.chat('待办：整理会议纪要')['actions'][0];self.assertEqual(200,self.apply(task)[0])
+            complete=self.chat('完成待办：整理会议纪要')['actions'][0];self.assertEqual(200,self.apply(complete)[0])
+            self.assertTrue(self.server.application.store.list_tasks()[0]['completed'])
+
+    def test_weekend_free_time_is_not_reported_as_a_workday(self):
+        tz=zone("Asia/Shanghai")
+        with patch.object(self.server.application.engine,"_now",return_value=(datetime(2030,1,11,9,tzinfo=tz),tz)):
+            value=self.chat('查找明天30分钟的空闲时间')
+        self.assertIn('没有找到',value['reply']);self.assertEqual([],value['actions'])
 
     def test_sync_request_has_no_network_until_confirm_and_binds_configuration(self):
         sync=self.server.application.caldav

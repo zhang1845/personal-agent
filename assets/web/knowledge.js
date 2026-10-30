@@ -2,7 +2,7 @@
 
 // UI uses the workbench's existing request, modal and status helpers.
 class KnowledgeUI {
-  constructor(services) { Object.assign(this, services); this.projectId = null; this.projects = []; this.request = 0; this.source = null; this.project = null; this.workstyleVersion = 1; }
+  constructor(services) { Object.assign(this, services); this.projectId = null; this.projects = []; this.request = 0; this.searchRequest = 0; this.source = null; this.project = null; this.workstyleVersion = 1; }
   node(id) { return document.getElementById(id); }
   button(label, callback, cls = "button is-ghost is-small") { const node = this.el("button", cls, label); node.type = "button"; node.addEventListener("click", callback); return node; }
   selectProjects(id, value, firstLabel) {

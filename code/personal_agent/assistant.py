@@ -529,4 +529,4 @@ class AgentEngine:
             self.knowledge.save_answer_sources(message_id, result["sources"])
         if self.knowledge:
             result["project_id"] = self.knowledge.session_project(session_id)
-        return dict(result, session_id=session_id, mode=mode)
+        return dict(result, session_id=session_id, mode=mode, message_id=message_id)

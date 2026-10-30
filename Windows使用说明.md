@@ -56,3 +56,15 @@ API/日历/通知配置仍是本机明文，迁移的目录包含凭据。Window
 Windows 验收应包含首次依赖安装、双击启停、中文路径、日程/待办编辑、文件解析、API 配置保存、关闭命令窗口后服务仍在运行，以及无冲突的正常停止。CI 会运行依赖安装和功能回归，不会代替双击启动及实际浏览器操作。
 
 实现依据：[Python 子进程说明](https://docs.python.org/3.12/library/subprocess.html)、[Windows 管道与 select 的限制](https://docs.python.org/3.12/library/select.html)、[zoneinfo 的跨平台时区说明](https://docs.python.org/3.12/library/zoneinfo.html)。
+
+## 检索评测与反馈
+
+在助手回复下点击“有问题”，进入“评测与反馈”整理原因、改进措施和实际复测结果，可转为检索用例。预期资料须人工选择；多选使用 Ctrl（Mac 使用 Command）。页面与 Mac 使用相同业务代码，不需要新增依赖或本地模型。
+
+固定示例集只在临时数据库运行，不写入你的正式资料库：
+
+```bat
+.venv\Scripts\python.exe -X utf8 -B code\quality_benchmark.py --output output\retrieval-benchmark.json
+```
+
+离线指标衡量检索，不是模型回答准确率；无样本不显示通过率。真实资料与预期标签变化后需复核再测。反馈仍由人工处理，不会自动训练模型。
