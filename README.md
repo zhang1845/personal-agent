@@ -1,4 +1,4 @@
-# Daynest · AI 个人工作台 v0.8.1
+# Daynest · AI 个人工作台 v0.9.0
 
 Daynest 将日程、待办、项目资料和个人记忆集中到一个支持自然语言交互的个人工作台。前端使用原生 HTML/CSS/JavaScript 与本地 Bulma 1.0.4，后端使用 Python、SQLite 和 nanobot Python SDK。没有 npm 构建步骤，不安装 Ollama 或本地大模型。明确指令仍可离线使用；复杂请求在你配置并启用 API 后交给真实 nanobot 工具循环。
 
@@ -32,6 +32,12 @@ python3.12 -m venv .venv
 ```sh
 .venv/bin/python -B code/run.py web --port 8788 --data-dir /private/tmp/daynest-test
 ```
+
+## v0.9 可选云端入口
+
+新增单用户密码登录、8小时会话、退出、持久化数据目录及 Docker/Caddy 部署配置。详细步骤见 [完整在线版部署](deploy/README.md) 和 [腾讯云操作指南](deploy/tencent-cloud.md)。本机 Win/Mac 启动方式沿用原有入口；云端需要自己的托管账号、HTTPS 和持久化存储，目前没有部署公网服务或开通付费资源。
+
+模型 API Key 不进入 GitHub、Actions Secrets 或镜像。云端首次使用空数据，登录后在设置页单独配置；不会自动上传本机 Key 或个人数据。GitHub Cloud image check 只验证镜像构建及私密目录排除，不代表已经上线。
 
 ## v0.8 检索与反馈
 
@@ -134,12 +140,14 @@ CalDAV 配置服务地址、账号、应用专用密码，保存后测试连接�
 
 保存前展示解析结果和可能重复的来源；同项目相同正文会拦截重复保存。单条正文最多 12000 字、个人想法最多 2000 字，超长导入明确提示并需要确认截选。保留项目关联、独立想法、关键词搜索、历史引用；不是向量语义搜索。网页抓取拒绝 DNS 返回的内网地址。当前代理可能返回 198.18/15 假 IP，此时可在导入窗口明确勾选“代理假 IP 时使用公开 DNS”：仅向 Cloudflare 发送域名并核验公开结果，固定连接到核验 IP；不发送路径、正文或凭据。选项默认关闭，不放宽内网校验。
 
-数据位于 `output/runtime/`：原有 `calendar.sqlite3`、`assistant.sqlite3`、`knowledge.sqlite3`，新增自动化、CalDAV 映射/操作记录、Agent 执行记录数据库，以及私密配置和受限 SDK 工作目录。升级前已备份旧数据；迁移或备份前先停止服务，整体保留这些文件；Windows 迁移步骤见使用说明。没有云备份、加密保险箱、多用户登录或公网访问。运行日志为 `output/service.log`。
+本机数据位于 `output/runtime/`：原有 `calendar.sqlite3`、`assistant.sqlite3`、`knowledge.sqlite3`，新增自动化、CalDAV 映射/操作记录、Agent 执行记录数据库，以及私密配置和受限 SDK 工作目录。升级前已备份旧数据；迁移或备份前先停止服务，整体保留这些文件；Windows 迁移步骤见使用说明。云端使用独立的持久化数据目录，不自动迁移。本项目没有云备份、加密保险箱或多用户登录。运行日志为 `output/service.log`。
 
 ## 验证与交付
 
+完整云端 HTTP 回归需先安装 `requirements-cloud.txt`；仅安装本机依赖时，两项可选 Waitress HTTP 测试会跳过。GitHub Win/Mac CI 必装云端依赖并运行全部测试。
+
 ```sh
-.venv/bin/python -B -m unittest discover -s code/tests -q
+PYTHONPATH=code .venv/bin/python -B -m unittest discover -s code/tests -q
 node --test code/tests/*.test.cjs
 .venv/bin/python code/package_release.py
 ```

@@ -69,6 +69,7 @@
     catch (_) { throw { code: "connection_failed", message: "无法连接工作台，请检查服务是否正在运行。" }; }
     let result;
     try { result = await response.json(); } catch (_) { throw { code: "invalid_response", message: "暂时无法读取结果，请刷新后再试。" }; }
+    if (response.status === 401 && result.error?.code === "authentication_required") window.location.assign("/login");
     if (!response.ok || result.error) throw result.error || { message: "操作未完成，请稍后再试。" };
     return result;
   }
@@ -94,7 +95,7 @@
   function renderStatus() {
     if (!state.status) return;
     const local = state.status.backend === "local_development";
-    $("backend-label").textContent = local ? "本地日历" : "外部日历";
+    $("backend-label").textContent = local ? state.cloudMode ? "工作台日历" : "本地日历" : "外部日历";
     $("backend-note").textContent = local ? state.caldavSettings && state.caldavSettings.enabled ? "外部日历已配置" : "未连接外部日历" : "日程由已连接的日历提供";
     $("sidebar-timezone").textContent = timezoneLabel();
     $("agenda-timezone").textContent = timezoneLabel();
@@ -843,7 +844,7 @@
   async function changeDate(value) { setDate(value); try { await loadData(); showError("global-error", null); } catch (error) { showError("global-error", error); } }
   async function boot() {
     decorateIcons(); bindEvents(); initializeChatLayout(); renderChatDraft(); updateChatControls(); renderChat();
-    try { const bootstrap = await api("/api/bootstrap"); state.token = bootstrap.token || bootstrap.csrf_token || ""; state.status = bootstrap.status; state.prefs = bootstrap.preferences || {};
+    try { const bootstrap = await api("/api/bootstrap"); state.token = bootstrap.token || bootstrap.csrf_token || ""; state.status = bootstrap.status; state.prefs = bootstrap.preferences || {}; state.cloudMode = bootstrap.deployment?.mode === "cloud"; $("cloud-session").hidden = !state.cloudMode;
       knowledgeUI = new KnowledgeUI({api, el, busy, showError, toast, confirmOperation,
         onProjects(projects) { const select = $("chat-project"); select.replaceChildren(); const first = el("option", "", "不限定项目"); first.value = ""; select.append(first); projects.forEach((project) => { const option = el("option", "", project.name); option.value = project.id; select.append(option); }); if (!projects.some(p => p.id === state.chatProjectId)) state.chatProjectId = null; select.value = state.chatProjectId || ""; },
         onAsk(projectId, query) { if (state.chatBusy || chatDraft.uploading) { toast("请等待当前对话完成"); return; } resetChatDraft(); state.sessionAttachments=[]; state.sessionId = null; state.sessionRequest++; state.messages = []; state.actions = []; state.chatProjectId = projectId; $("session-select").value = ""; $("chat-project").value = projectId || ""; renderChat(); setChatCollapsed(false); $("chat-input").value = query; $("chat-input").focus(); }

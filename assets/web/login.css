@@ -1,0 +1,13 @@
+* { box-sizing:border-box; }
+body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); font:14px/1.6 var(--font-ui); padding:48px 24px; }
+.login-workspace { max-width:360px; margin:10vh auto 0; }
+.login-brand { color:var(--ink); font-weight:600; font-size:20px; text-decoration:none; }
+h1 { font-size:28px; margin:36px 0 8px; }
+.login-note { color:var(--muted); margin:8px 0 24px; }
+label { display:block; font-weight:500; margin:24px 0 8px; }
+input,button { display:block; width:100%; min-height:44px; border-radius:12px; font:inherit; padding:10px 14px; }
+input { color:var(--ink); background:var(--paper); border:1px solid var(--line); }
+input:focus { outline:2px solid var(--focus); outline-offset:2px; }
+button { background:var(--ink); color:var(--paper); border:0; cursor:pointer; margin:16px 0 24px; font-weight:500; }
+.login-error { color:var(--danger); min-height:24px; margin:8px 0; }
+@media(max-width:400px) { body { padding:32px 20px; } .login-workspace { margin-top:5vh; } }

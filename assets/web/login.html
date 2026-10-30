@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light"><meta name="robots" content="noindex,nofollow">
+  <title>登录 · Daynest</title>
+  <link rel="stylesheet" href="/brand.css"><link rel="stylesheet" href="/login.css">
+</head>
+<body><main class="login-workspace">
+  <a class="login-brand" href="/login" aria-label="Daynest 登录">Daynest</a>
+  <h1>登录工作台</h1><p class="login-note">使用你的个人登录密码继续。</p>
+  <form method="post" action="/login">
+    <label for="password">登录密码</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" required maxlength="256" autofocus>
+    <p class="login-error" role="alert">{{message}}</p>
+    <button type="submit">登录</button>
+  </form>
+  <p class="login-note">模型 API Key 在登录后的设置页中填写。</p>
+</main></body></html>

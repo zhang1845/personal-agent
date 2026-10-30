@@ -1,0 +1,64 @@
+name: Cloud image check
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - requirements-cloud.txt
+      - requirements.lock.txt
+      - deploy/**
+      - code/**
+      - assets/web/**
+      - .github/workflows/cloud-build.yml
+permissions:
+  contents: read
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Add isolated exclusion canaries
+        run: |
+          mkdir -p output/runtime private
+          printf '%s' 'build-exclusion-test-only' > output/runtime/model-api.json
+          PYTHONPATH=code python - <<'PY'
+          from pathlib import Path
+          from cloud_admin import write_config
+          write_config('private/cloud.env', 'https://ci.daynest.invalid', '/data', 'ci-test-password-only')
+          Path('.env').write_text('DAYNEST_PUBLIC_URL=https://ci.daynest.invalid\n', encoding='utf-8')
+          PY
+      - name: Validate Compose and preserve quoted login hash
+        run: |
+          PYTHONPATH=code python - <<'PY'
+          import json, subprocess
+          from cloud_admin import read_config
+          config = json.loads(subprocess.check_output(['docker', 'compose', '--env-file', '.env', '-f', 'deploy/compose.yml', '--profile', 'https', 'config', '--format', 'json'], text=True))
+          assert config['services']['daynest']['environment']['DAYNEST_PASSWORD_HASH'] == read_config('private/cloud.env')['DAYNEST_PASSWORD_HASH']
+          assert config['services']['daynest']['environment']['DAYNEST_DATA_DIR'] == '/data'
+          print('Compose configuration validated without revealing credentials')
+          PY
+      - name: Build cloud image without runtime credentials
+        run: docker build --tag daynest:ci .
+      - name: Verify no private files entered the image
+        run: >-
+          docker run --rm --entrypoint python daynest:ci -c
+          "from pathlib import Path; assert not Path('/app/output').exists();
+          assert not Path('/app/private').exists(); assert not Path('/app/.env').exists();
+          from personal_agent.cloud import CloudConfig"
+      - name: Test cloud login and workbench inside Linux image
+        run: docker run --rm daynest:ci python -X utf8 -B -m unittest discover -s code/tests -p test_cloud.py -q
+      - name: Verify non-root default data volume
+        run: >-
+          docker run --rm --entrypoint python daynest:ci -c
+          "import os; from personal_agent.cloud import CloudConfig,CloudGateway,password_hash;
+          assert os.getuid()==10001;
+          config=CloudConfig.from_env({'DAYNEST_PUBLIC_URL':'https://ci.daynest.invalid',
+          'DAYNEST_DATA_DIR':'/data','DAYNEST_PASSWORD_HASH':password_hash('ci-test-password-only')});
+          gateway=CloudGateway(config); gateway.close(); print('Default volume is writable by non-root owner')"
+      - name: Verify real document parsers and SDK inside Linux image
+        run: docker run --rm daynest:ci python -X utf8 -B -m unittest discover -s code/tests -p test_v06_features.py -q

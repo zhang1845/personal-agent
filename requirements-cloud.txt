@@ -1,0 +1,3 @@
+# Optional cloud serving dependency; the desktop lockfile remains unchanged.
+-r requirements.lock.txt
+waitress==3.0.2

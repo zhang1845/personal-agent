@@ -1,0 +1,3 @@
+{$DAYNEST_PUBLIC_URL} {
+    reverse_proxy daynest:8080
+}
