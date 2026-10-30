@@ -223,7 +223,7 @@ class ChatIntegrations(PersonalStore):
         if data['kind']=='one_time':
             tz_name=self.calendar.call('calendar_get_preferences',{})['preferences']['timezone']
             instant=datetime.fromisoformat(data['run_at']).astimezone(zone(tz_name))
-            lines+=['时间：'+instant.strftime('%Y-%m-%d %H:%M')+('（北京时间）' if tz_name=='Asia/Shanghai' else '（'+tz_name+'）'),'内容：'+data['message'],'按此时刻触发，日程改期后需另行调整。','电脑需保持运行，错过5分钟不再补发。']
+            lines+=['时间：'+instant.strftime('%Y-%m-%d %H:%M')+('（北京时间）' if tz_name=='Asia/Shanghai' else '（'+tz_name+'）'),'内容：'+data['message'],'按此时刻触发，日程改期后需另行调整。','错过提醒时间超过5分钟后不再补发。']
         elif data['kind']=='event_reminders':lines.append('提前 '+str(data['lead_minutes'])+' 分钟提醒定时日程；全天日程除外。')
         else:
             lines.append('每日时间：'+data['time'])

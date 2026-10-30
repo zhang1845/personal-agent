@@ -1,4 +1,4 @@
-# Daynest · AI 个人工作台 v0.10.0
+# Daynest · AI 个人工作台 v0.10.1
 
 Daynest 将日程、待办、项目资料和个人记忆集中到一个支持自然语言交互的个人工作台。前端使用原生 HTML/CSS/JavaScript 与本地 Bulma 1.0.4，后端使用 Python、SQLite 和 nanobot Python SDK。没有 npm 构建步骤，不安装 Ollama 或本地大模型。明确指令仍可离线使用；复杂请求在你配置并启用 API 后交给真实 nanobot 工具循环。
 
@@ -41,7 +41,7 @@ python3.12 -m venv .venv
 
 ## v0.9 可选云端入口
 
-新增单用户密码登录、8小时会话、退出、持久化数据目录及 Docker/Caddy 部署配置。详细步骤见 [完整在线版部署](deploy/README.md) 和 [腾讯云操作指南](deploy/tencent-cloud.md)。本机 Win/Mac 启动方式沿用原有入口；云端需要自己的托管账号、HTTPS 和持久化存储，目前没有部署公网服务或开通付费资源。
+新增单用户密码登录、8小时会话、退出、持久化数据目录及 Docker/Caddy 部署配置。详细步骤见 [完整在线版部署](deploy/README.md) 和 [腾讯云操作指南](deploy/tencent-cloud.md)。本机 Win/Mac 启动方式沿用原有入口；云端需要自己的托管账号、HTTPS 和适配的持久化存储，不自动开通付费资源。
 
 模型 API Key 不进入 GitHub、Actions Secrets 或镜像。云端首次使用空数据，登录后在设置页单独配置；不会自动上传本机 Key 或个人数据。GitHub Cloud image check 只验证镜像构建及私密目录排除，不代表已经上线。
 

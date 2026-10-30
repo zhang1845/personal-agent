@@ -43,7 +43,9 @@ CloudBase 模式不启动后台 APScheduler。只有登录后的有效业务请�
 
 ## 部署容器与运行变量
 
-使用现有项目的 Dockerfile 容器部署，构建上下文为项目根目录，Dockerfile 为 `Dockerfile`，监听端口为 **8080**。镜像命令已监听 `0.0.0.0` 并读取平台 `PORT`。使用 CloudBase 提供的 HTTPS 入口，无需部署 Compose / Caddy。上传前检查源码包中没有 `private/`、`.env*`、`output/`、日志或本机运行数据；不要直接压缩整个本机工作区。参见 [官方部署方式](https://docs.cloudbase.net/run/deploy/deploy/introduce)。
+使用现有项目的 Dockerfile 容器部署，构建上下文为项目根目录，Dockerfile 为 `Dockerfile`，监听端口为 **8080**。镜像命令已监听 `0.0.0.0` 并读取平台 `PORT`。优先使用该服务自己的 HTTPS 默认域名，无需部署 Compose / Caddy，也不占用同环境其他应用的根路由。上传前检查源码包中没有 `private/`、`.env*`、`output/`、日志或本机运行数据；不要直接压缩整个本机工作区。参见 [官方部署方式](https://docs.cloudbase.net/run/deploy/deploy/introduce)。
+
+默认域名是开发测试入口，首次导航会显示 CloudBase 访问提示；不能当作无访问限制的正式自定义域名。[默认域名说明](https://docs.cloudbase.net/service/alias)。容器 HTTP 请求默认限时约60秒，应用内部240秒等待并不等于公网支持240秒；长模型任务可能中断，需要核对当前套餐及控制台是否允许调整请求超时。官方容器教程提及「服务设置 → 高级配置 → 请求超时」，实际有无此项及额度以控制台为准，不能猜 API 参数或自动升级套餐。[请求限制](https://docs.cloudbase.net/run/limitation)、[容器 Agent 配置](https://docs.cloudbase.net/recipes/deploy-mastra-agent-to-cloudbase-run)。
 
 在**运行环境变量**中设置以下值，不要当作构建参数填写：
 
@@ -88,6 +90,6 @@ Windows（使用项目 Python 3.12 环境）：
 - 实例允许缩容至 0，界面显示按需提醒限制；没有后台调度器或额外的定频唤醒任务。
 - 查看实际内存、冷启动耗时、资源点用量和日志，再判断起步规格是否满足个人使用。
 
-GitHub [cloud-build.yml](../.github/workflows/cloud-build.yml) 会在 Linux 镜像内运行云端登录、快照、配置 CAS、临时身份和网关测试，并检查镜像排除私密文件。测试使用假的凭据和存储，不部署服务、不联系真实模型或 CloudBase。当前尚无本次变更的真实 Linux CI / 公网部署通过结论；本机没有运行 Docker 也不应记作镜像验证通过。
+GitHub [cloud-build.yml](../.github/workflows/cloud-build.yml) 在 Linux 镜像内运行云端登录、快照、配置 CAS、临时身份和网关测试，并检查镜像排除私密文件。测试使用假的凭据和存储，不部署服务、不联系真实模型或 CloudBase。应核对对应代码提交的真实工作流结果，再在目标云环境验证读写与重启；本机没有运行 Docker 不应记作镜像验证通过。
 
 需要持续运行并准点提醒时，使用 [自有服务器部署](README.md)；该选择可能需要已有服务器资源。本文不自动购买或升级任何资源。
