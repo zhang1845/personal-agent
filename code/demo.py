@@ -15,7 +15,7 @@ def main():
     output.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="calendar-demo-", dir=str(output)) as tmp:
         service = CalendarService(Path(tmp) / "demo.sqlite3")
-        create = {"request_id": "demo-create-once", "title": "演示 个人 Agent 方案评审",
+        create = {"request_id": "demo-create-once", "title": "演示 Daynest 方案评审",
                   "start": "2026-10-27T15:00:00+08:00", "end": "2026-10-27T16:00:00+08:00",
                   "location": "本地开发样例"}
         steps = [{"step": "status", "result": service.call("calendar_status", {})}]

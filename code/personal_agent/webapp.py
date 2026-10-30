@@ -549,7 +549,7 @@ def run_web(data_dir, port=8787, open_browser=False, calendar=None):
         import faulthandler
         faulthandler.cancel_dump_traceback_later()
     url = "http://127.0.0.1:%s" % server.server_address[1]
-    print("个人 Agent 工作台：" + url, flush=True)
+    print("Daynest 工作台：" + url, flush=True)
     print("数据目录：" + str(Path(data_dir).resolve()), flush=True)
     print("本地工作台；外部同步和通知按已保存配置启用。按 Ctrl+C 停止。", flush=True)
     if open_browser:

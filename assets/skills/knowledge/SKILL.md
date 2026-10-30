@@ -3,7 +3,7 @@ name: personal-knowledge
 description: 使用本地个人资料 MCP 检索项目背景和原文，区分原文摘录、个人想法与推断。
 ---
 
-# 个人资料与项目
+# Daynest · 个人资料与项目
 
 先调用 knowledge_list_projects 定位真实项目 ID。用户明确项目时，knowledge_search 必须带 project_id；不将其他项目的材料混入结论。未确定项目时说明搜索范围，必要时澄清。
 

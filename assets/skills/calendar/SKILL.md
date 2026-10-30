@@ -3,7 +3,7 @@ name: calendar
 description: 用个人日程 MCP 工具管理明确的日历事件，查询安排、检查冲突、寻找空闲时段及维护用户偏好。
 ---
 
-# 个人日程
+# Daynest · 个人日程
 
 首次操作先调用 `calendar_status`、`calendar_get_preferences`，需要时列出日历。状态若是本地开发模式，明确告诉用户这里保存的是本机测试日程，没有接通云端和手机提醒。不得把本地写入当成已同步 iCloud、飞书、Google 或 Outlook。
 

@@ -108,7 +108,7 @@ def stop_service(port, data_dir, state_path, info):
         current = probe(port, data_dir, timeout=min(PROBE_TIMEOUT, remaining))
         if not current or current.get('service_instance') != info.get('service_instance'):
             state_path.unlink(missing_ok=True)
-            print('个人 Agent 后台服务已停止。')
+            print('Daynest 后台服务已停止。')
             return
         remaining = deadline - time.monotonic()
         if remaining > 0:

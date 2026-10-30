@@ -1,0 +1,2 @@
+# Windows CMD launchers keep their native CRLF bytes on both platforms.
+*.cmd -text whitespace=cr-at-eol

@@ -1,6 +1,6 @@
-# 当前设计参考
+# Daynest · 当前设计参考
 
-用户提供的 **Ui — clinical blueprint on frosted paper**，原文见 `design/ui-style-reference.md`。本次将该规格应用到现有个人工作台，继续使用 Bulma 和原生 JavaScript。
+用户提供的 **Ui — clinical blueprint on frosted paper**，原文见 `design/ui-style-reference.md`。本次将该规格应用到Daynest 工作台，继续使用 Bulma 和原生 JavaScript。
 
 - 黑白灰三层表面，细灰边界，黑底白字主按钮，浅灰次按钮；红色仅用于错误和取消/删除。
 - Geist 本地字体、400/500/600 字重，正文 14px；标题和真实概况数字通过字号与字距建立层级。计数全部读取现有数据。

@@ -1,14 +1,18 @@
-# 我的 Agent · 个人工作台 v0.8.0
+# Daynest · AI 个人工作台 v0.8.1
 
-原生日程、待办、项目资料库和个人记忆工作台。前端使用原生 HTML/CSS/JavaScript 与本地 Bulma 1.0.4，后端使用 Python、SQLite 和 nanobot Python SDK。没有 npm 构建步骤，不安装 Ollama 或本地大模型。明确指令仍可离线使用；复杂请求在你配置并启用 API 后交给真实 nanobot 工具循环。
+Daynest 将日程、待办、项目资料和个人记忆集中到一个支持自然语言交互的个人工作台。前端使用原生 HTML/CSS/JavaScript 与本地 Bulma 1.0.4，后端使用 Python、SQLite 和 nanobot Python SDK。没有 npm 构建步骤，不安装 Ollama 或本地大模型。明确指令仍可离线使用；复杂请求在你配置并启用 API 后交给真实 nanobot 工具循环。
+
+项目对外名称统一为 **Daynest**。现有 Python 包名、命令、GitHub 地址及数据目录沿用原有标识，升级可直接复用已有配置。
 
 ## 启动与停止
 
-支持 macOS 与 Windows 本机使用。Windows 10/11 x64 使用 Python 3.12，完整步骤见 [Windows 使用说明](Windows使用说明.md)：先双击 `安装依赖.cmd`，再双击 `启动个人Agent.cmd`；通过 `停止个人Agent.cmd` 停止。Windows 首次安装与双击流程仍需实机验收。
+旧版启动和停止脚本继续可用，以下使用 Daynest 命名的新入口。
+
+支持 macOS 与 Windows 本机使用。Windows 10/11 x64 使用 Python 3.12，完整步骤见 [Windows 使用说明](Windows使用说明.md)：先双击 `安装依赖.cmd`，再双击 `启动Daynest.cmd`；通过 `停止Daynest.cmd` 停止。Windows 首次安装与双击流程仍需实机验收。
 
 以下为 macOS 命令，在项目目录运行。不要跨系统复制 `.venv`。
 
-双击 `启动个人Agent.command` 打开 [工作台](http://127.0.0.1:8787)。服务在后台运行，关闭终端或浏览器不会停止；双击 `停止个人Agent.command` 停止本项目服务。电脑休眠、关机后不能继续执行计划，没有配置开机自启动。
+双击 `启动Daynest.command` 打开 [工作台](http://127.0.0.1:8787)。服务在后台运行，关闭终端或浏览器不会停止；双击 `停止Daynest.command` 停止本项目服务。电脑休眠、关机后不能继续执行计划，没有配置开机自启动。
 
 ```sh
 .venv/bin/python code/manage_service.py start
@@ -26,7 +30,7 @@ python3.12 -m venv .venv
 需要前台调试或隔离数据时：
 
 ```sh
-.venv/bin/python -B code/run.py web --port 8788 --data-dir /private/tmp/my-agent-test
+.venv/bin/python -B code/run.py web --port 8788 --data-dir /private/tmp/daynest-test
 ```
 
 ## v0.8 检索与反馈

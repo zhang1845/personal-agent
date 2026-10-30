@@ -66,7 +66,7 @@ def calendar_bytes(events, default_timezone="Asia/Shanghai", now=None):
     if timestamp.tzinfo is None:
         raise AgentError("export_invalid_event", "导出时间需要 UTC 偏移")
     stamp = timestamp.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Personal Agent//Calendar snapshot//ZH-CN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH"]
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Daynest//Calendar snapshot//ZH-CN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH"]
     seen = set()
     for event in events:
         if not isinstance(event, dict) or not all(isinstance(event.get(k), str) and event[k] for k in ("id", "calendar_id", "title", "start", "end")):

@@ -35,7 +35,7 @@ def build_config(db_path, python_executable=None, bridge_config=None, with_knowl
 
 
 def parser():
-    root = argparse.ArgumentParser(description="本地个人日程工具。真实日历和本地模型需另行配置，不自动收费或联网授权。")
+    root = argparse.ArgumentParser(description="Daynest 本地个人日程工具。真实日历和本地模型需另行配置，不自动收费或联网授权。")
     root.add_argument("--db", default=str(DEFAULT_DB), help="SQLite 文件路径，默认保存在项目 output/runtime")
     root.add_argument("--bridge-config", help="可选的外部 MCP 日历桥接配置文件；不自动取得账号授权")
     commands = root.add_subparsers(dest="command", required=True)
@@ -44,7 +44,7 @@ def parser():
     call.add_argument("--args", default="{}", help="JSON 对象参数")
     mcp = commands.add_parser("mcp", help="启动 MCP stdio 服务，stdout 仅用于协议")
     mcp.add_argument("--with-knowledge", action="store_true", help="启用同数据目录的只读项目和资料工具")
-    web = commands.add_parser("web", help="启动本机个人 Agent 网页工作台")
+    web = commands.add_parser("web", help="启动本机 Daynest 网页工作台")
     web.add_argument("--port", type=int, default=8787, help="本机端口，默认 8787")
     web.add_argument("--data-dir", help="日历、对话、任务、记忆的数据目录，默认 output/runtime")
     web.add_argument("--open", action="store_true", help="启动后在默认浏览器打开")

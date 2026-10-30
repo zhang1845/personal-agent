@@ -1,3 +1,3 @@
-"""Deterministic calendar tools for a local nanobot personal agent."""
+"""Daynest: personal AI workspace and calendar tools for nanobot."""
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"

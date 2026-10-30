@@ -117,7 +117,7 @@ class Automations(PersonalStore):
     def test_notification(self):
         settings=self.config.read()
         if not settings['enabled']:raise AgentError('validation_error','请先保存并启用通知渠道；未发送测试消息')
-        nid=self.emit('manual-test:'+uuid4().hex,'manual','个人 Agent 通知测试','这是你主动发起的测试消息。')
+        nid=self.emit('manual-test:'+uuid4().hex,'manual','Daynest 通知测试','这是你主动发起的测试消息。')
         self.drain();item=next(n for n in self.inbox() if n['id']==nid)
         if item['state']=='unknown':raise AgentError('notification_unknown','测试结果未确认，请检查通知渠道')
         return {'notification':item}

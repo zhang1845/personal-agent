@@ -1,4 +1,6 @@
-# 设计
+# Daynest · 设计（历史记录）
+
+> 历史早期架构记录。当前功能与模型接入方式以 README.md、restrictions.md 为准。
 
 Python 标准库实现服务、SQLite 存储、JSON CLI、MCP stdio 与本机 HTTP 工作台。原生 HTML/CSS/JS 作为静态界面，无 Node 运行依赖。核心可在 Python 3.9 及以上运行；推荐 Python 3.11 以上与 nanobot 对齐。
 

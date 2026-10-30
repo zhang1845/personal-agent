@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def build_release(destination=None, root=ROOT):
     version = re.search(r'__version__ = "([^"]+)"', (root / 'code/personal_agent/__init__.py').read_text(encoding='utf-8')).group(1)
-    destination = Path(destination) if destination else root / 'output' / ('personal-agent-v%s.zip' % version)
+    destination = Path(destination) if destination else root / 'output' / ('daynest-v%s.zip' % version)
     destination.parent.mkdir(parents=True, exist_ok=True)
     excluded = {'.git', '.venv', '__pycache__', 'output', 'logs', 'private'}
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:

@@ -58,7 +58,7 @@ def main():
     subprocess.run([str(PYTHON), '-X', 'utf8', '-m', 'pip', 'check'], check=True, cwd=ROOT, env=env)
     subprocess.run([str(PYTHON), '-X', 'utf8', str(Path(__file__)), '--verify'],
                    check=True, cwd=ROOT, env=env)
-    print('安装完成。双击“启动个人Agent.cmd”打开工作台。')
+    print('安装完成。双击“启动Daynest.cmd”打开 Daynest。')
     return 0
 
 

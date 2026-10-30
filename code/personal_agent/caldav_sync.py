@@ -146,7 +146,7 @@ class CalDAVSync(PersonalStore):
         if mapping and not etag:raise AgentError('unsupported_capability','远端未返回 ETag，无法安全修改或删除')
         body=''
         if not delete:
-            calendar=Calendar();calendar.add('prodid','-//Personal Agent//CalDAV//');calendar.add('version','2.0');event=Event();event.add('uid',uid)
+            calendar=Calendar();calendar.add('prodid','-//Daynest//CalDAV//');calendar.add('version','2.0');event=Event();event.add('uid',uid)
             tz=zone(local.get('timezone','Asia/Shanghai'))
             event.add('dtstart',parse_datetime(local['start'],tz).astimezone(tz).date() if local['all_day'] else parse_datetime(local['start'],tz))
             event.add('dtend',parse_datetime(local['end'],tz).astimezone(tz).date() if local['all_day'] else parse_datetime(local['end'],tz))
