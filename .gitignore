@@ -29,3 +29,7 @@ Thumbs.db
 Desktop.ini
 .vscode/
 .idea/
+
+# Personal project documents stay local
+/docs/
+/用户画像与验证计划.md

@@ -53,8 +53,11 @@ request=json.loads(sys.stdin.readline())
 print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':{'protocolVersion':'2025-06-18','capabilities':{'tools':{}}}}),flush=True)
 time.sleep(5)
 """
-        bridge = self.make(writes_enabled=True, timeout_seconds=.15)
+        bridge = self.make(writes_enabled=True, timeout_seconds=3)
         bridge.config['args'] = ['-u', '-c', script]
+        # Only the blocked write is under test. Process startup has its own deadline.
+        bridge._ensure_started()
+        bridge.timeout = .15
         started = time.monotonic()
         self.assert_error('unknown_outcome', lambda: bridge.create_event({'description':'中'*130000}, 'once'))
         self.assertLess(time.monotonic() - started, 2)
@@ -106,7 +109,8 @@ class PortableStorageTests(unittest.TestCase):
                 target = root/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(value,encoding='utf-8')
             put('code/personal_agent/__init__.py','__version__ = "0.6.0"')
             put('启动个人Agent.cmd','@echo off')
-            for name in ('output/runtime/model-api.json','logs/session.log','.venv/pyvenv.cfg','assets/private/token.json','.env','old.sqlite3-wal'):
+            put('code/release-files.txt','code/personal_agent/__init__.py\n启动个人Agent.cmd\n')
+            for name in ('output/runtime/model-api.json','logs/session.log','.venv/pyvenv.cfg','assets/private/token.json','.env','old.sqlite3-wal','docs/project/private-canary.md','code/local-notes.py'):
                 put(name,'private-unit-test-token')
             archive = packager.build_release(Path(directory)/'release.zip',root=root)
             with zipfile.ZipFile(archive) as release:

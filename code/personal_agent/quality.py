@@ -52,6 +52,16 @@ class QualityStore(PersonalStore):
         if run_id:
             with self.connection() as c:c.execute('INSERT OR REPLACE INTO answer_runs VALUES(?,?)',(message_id,run_id))
 
+    def runs_for_messages(self, message_ids):
+        if not message_ids:
+            return {}
+        placeholders = ",".join("?" for _ in message_ids)
+        with self.connection() as c:
+            return dict(c.execute(
+                f"SELECT message_id,run_id FROM answer_runs WHERE message_id IN ({placeholders})",
+                message_ids
+            ).fetchall())
+
     def feedback(self, body):
         fields(body,{'session_id','message_id','rating','category','note','expected_version'},{'session_id','message_id','rating'})
         if not isinstance(body['session_id'],str) or type(body['message_id']) is not int:raise AgentError('validation_error','请选择真实的助手回复')

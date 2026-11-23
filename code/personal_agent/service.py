@@ -308,17 +308,15 @@ class CalendarService:
             conn.execute("INSERT OR REPLACE INTO preferences VALUES(1,?)", (json.dumps(prefs),))
             return {"preferences": prefs}
 
-    def _free_slots(self, args, prefs):
+    def working_gaps(self, start, end, prefs, calendar_id=None):
+        """Open intervals in work time, minus lunch, calendar events and buffers."""
         tz = zone(prefs["timezone"])
-        a, b = interval(args.get("start"), args.get("end"), tz)
-        duration = timedelta(minutes=integer(args.get("duration_minutes"), "duration_minutes", 5, 1440))
-        limit = integer(args.get("limit", 5), "limit", 1, 20)
-        cal = self._calendar(args.get("calendar_id"))
+        a, b = interval(start, end, tz)
+        cal = self._calendar(calendar_id)
         buffer = timedelta(minutes=prefs["buffer_minutes"])
         # Widen the read window so a meeting just outside the query still contributes its buffer.
         events = self._events(a - buffer, b + buffer, cal["id"])
         blocks = [(parse_datetime(e["start"], tz) - buffer, parse_datetime(e["end"], tz) + buffer) for e in events]
-        slots = []
         day = a.astimezone(tz).date()
         last = b.astimezone(tz).date()
         while day <= last:
@@ -338,15 +336,20 @@ class CalendarService:
                             if x < c: updated.append((x, min(c, y)))
                             if d < y: updated.append((max(d, x), y))
                     gaps = updated
-                for x, y in gaps:
-                    # Return one earliest candidate per free gap, rather than filling
-                    # the first morning with many adjacent alternatives.
-                    if y - x >= duration:
-                        slots.append({"start": x.astimezone(tz).isoformat(),
-                                      "end": (x + duration).astimezone(tz).isoformat()})
-                        if len(slots) >= limit:
-                            return {"slots": slots, "timezone": prefs["timezone"]}
+                yield from gaps
             day += timedelta(days=1)
+
+    def _free_slots(self, args, prefs):
+        tz = zone(prefs["timezone"])
+        duration = timedelta(minutes=integer(args.get("duration_minutes"), "duration_minutes", 5, 1440))
+        limit = integer(args.get("limit", 5), "limit", 1, 20)
+        slots = []
+        for x, y in self.working_gaps(args.get("start"), args.get("end"), prefs, args.get("calendar_id")):
+            if y - x >= duration:
+                slots.append({"start": x.astimezone(tz).isoformat(),
+                              "end": (x + duration).astimezone(tz).isoformat()})
+                if len(slots) == limit:
+                    break
         return {"slots": slots, "timezone": prefs["timezone"]}
 
     def call(self, name, arguments):

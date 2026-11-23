@@ -258,6 +258,11 @@ def handle(engine, message, session_id, model_available=False, attachment_ids=No
         return None if model_available else result('请说明日期和时长，例如“查找明天30分钟的空闲时间”。',clarify=True)
     if denies_writes(message):
         return result('本条消息包含只读或否定要求，不会生成修改草案。需要变更时，请单独说明要执行的操作。')
+    if engine.task_planner is not None:
+        from .day_planning import handle as plan_day
+        plan = plan_day(engine, message, session_id)
+        if plan is not None:
+            return plan
     if re.search(r'工作时段|工作时间|午休',message) and re.search(r'设为|设置|改为|改成|调整',message):
         clocks=re.findall(r'(?<!\d)\d{1,2}:\d{2}(?!\d)',message)
         if len(clocks)==2:

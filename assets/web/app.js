@@ -39,6 +39,8 @@
   const actionTargetLoads = new Map();
   const chatDraft = new ChatFiles.Draft();
   let previewRequest = 0;
+  let overviewMonth = null;
+  let boardMode = "week";
 
   function icon(name) {
     const span = document.createElement("span");
@@ -126,6 +128,7 @@
     if (view === "quality" && qualityUI) qualityUI.load().catch((error) => showError("quality-error", error));
     if (view === "knowledge" && knowledgeUI) knowledgeUI.load().catch((error) => showError("knowledge-error", error));
     if (view === "calendar") loadCalendar().catch((error) => showError("global-error", error));
+    if (view === "overview" && state.date) loadOverviewMonth();
   }
   function eventNode(event) {
     const row = el("div", "event-row");
@@ -149,12 +152,13 @@
     $("memory-count").textContent = state.memories.length;
     const container = $("overview-events");
     if (!events.length) {
-      empty(container, "暂无日程", "为这一天添加一项安排。");
+      empty(container, "暂无日程");
       const add = el("button", "button is-outlined is-small empty-add", "添加日程"); add.type = "button";
       add.addEventListener("click", () => openEvent()); container.querySelector(".empty-state").append(add);
     }
     else container.replaceChildren(...events.map(eventNode));
     renderNextEvent(events); renderTasks(); renderMemories();
+    if (boardMode === "week" && state.view === "overview" && overviewMonth) renderOverviewMonth(overviewMonth);
   }
   function renderNextEvent(events) {
     const target = $("next-event"); target.replaceChildren();
@@ -268,22 +272,26 @@
     const hint = el("p", "calendar-board-hint", state.calendarLoading ? "正在读取日程…" : state.calendarError ? "日程读取失败，请刷新重试。" : "点击日期查看当天安排，点击日程可查看或编辑。");
     container.append(hint); renderSelectedCalendarDay();
   }
+  async function readEventRange(range) {
+    const results = await Promise.all(queryChunks(range).map((part) => api(`/api/events?${new URLSearchParams(part)}`)));
+    const events = new Map();
+    for (const result of results) {
+      if (result.complete !== true || !Array.isArray(result.events)) throw { message: "未能读取完整日程，请刷新重试。" };
+      for (const event of result.events) {
+        if (events.has(event.id) && events.get(event.id).version !== event.version) throw { message: "日程在读取期间发生变化，请刷新重试。" };
+        events.set(event.id, event);
+      }
+    }
+    return [...events.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  }
   async function loadCalendar() {
     const request = ++state.calendarRequest;
     const range = calendarRange();
     state.calendarLoading = true; state.calendarError = null; state.calendarEvents = []; renderCalendar();
     try {
-      const results = await Promise.all(queryChunks(range).map((part) => api(`/api/events?${new URLSearchParams(part)}`)));
+      const events = await readEventRange(range);
       if (request !== state.calendarRequest) return;
-      const events = new Map();
-      for (const result of results) {
-        if (result.complete !== true || !Array.isArray(result.events)) throw { message: "未能读取完整日程，请刷新重试。" };
-        for (const event of result.events) {
-          if (events.has(event.id) && events.get(event.id).version !== event.version) throw { message: "日程在读取期间发生变化，请刷新重试。" };
-          events.set(event.id, event);
-        }
-      }
-      state.calendarEvents = [...events.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+      state.calendarEvents = events;
     } catch (error) {
       if (request !== state.calendarRequest) return;
       state.calendarError = error; throw error;
@@ -295,14 +303,157 @@
     const next = state.calendarMode === "month" ? shiftMonth(state.date, direction) : addDays(state.date, direction * (state.calendarMode === "week" ? 7 : 1));
     changeDate(next);
   }
-  async function loadData() {
+  function indexMonthEvents(events, range, zone) {
+    const byDay = new Map();
+    for (const event of events) {
+      const eventZone = event.all_day && event.timezone ? event.timezone : zone;
+      const first = dateKey(event.start, eventZone);
+      const end = dateKey(event.end, eventZone);
+      // Use the full calendar's exclusive-midnight logic, including fractional seconds.
+      const last = CalendarDates.coversDay(event, end, zone) ? end : addDays(end, -1);
+      for (let day = first < range.start ? range.start : first; day <= last && day < range.end; day = addDays(day, 1)) {
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day).push(event);
+      }
+    }
+    return byDay;
+  }
+  function renderOverviewMonth(month) {
+    const board = $("overview-month-board");
+    const restoreFocus = board.contains(document.activeElement);
+    const focusedDay = restoreFocus ? document.activeElement.dataset.date : null;
+    const weekly = boardMode === "week";
+    board.replaceChildren(...(weekly ? weekColumns(month) : monthGrid(month)));
+    $("board-period-label").textContent = weekly ? "一周安排" : "月历";
+    $("overview-month-prev").setAttribute("aria-label", weekly ? "上一周" : "上个月");
+    $("overview-month-next").setAttribute("aria-label", weekly ? "下一周" : "下个月");
+    board.setAttribute("aria-busy", String(!month.byDay && !month.error));
+    if (!month.byDay) {
+      const status = el("p", "overview-month-status", month.error ? "计划板日程读取失败。" : "正在读取日程…");
+      if (month.error) {
+        const retry = el("button", "button is-text is-small text-button", "重试");
+        retry.type = "button";
+        retry.addEventListener("click", () => loadOverviewMonth(true));
+        status.append(retry);
+      }
+      board.append(status);
+    }
+    if (restoreFocus) {
+      const target = (focusedDay && board.querySelector(`[data-date="${focusedDay}"]`)) || board.querySelector('[aria-pressed="true"]');
+      target?.focus({ preventScroll: true });
+    }
+  }
+  function monthGrid(month) {
+    const monthKey = state.date.slice(0, 7);
+    $("overview-month-title").textContent = `${Number(monthKey.slice(0, 4))}年${Number(monthKey.slice(5))}月`;
+    const weekdays = el("div", "overview-month-weekdays");
+    weekdays.setAttribute("aria-hidden", "true");
+    for (const name of ["一", "二", "三", "四", "五", "六", "日"]) weekdays.append(el("span", "", name));
+    const grid = el("div", "overview-month-grid");
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-labelledby", "overview-month-title");
+    const today = dateKey();
+    for (let day = month.range.start; day < month.range.end; day = addDays(day, 1)) {
+      const events = month.byDay?.get(day) || [];
+      const button = el("button", "overview-month-date");
+      button.type = "button";
+      button.dataset.date = day;
+      button.classList.toggle("outside-month", !day.startsWith(monthKey));
+      button.classList.toggle("has-events", events.length > 0);
+      button.setAttribute("aria-pressed", String(day === state.date));
+      if (day === today) button.setAttribute("aria-current", "date");
+      const summary = month.error ? "日程读取失败" : !month.byDay ? "正在读取日程" : events.length ? `${events.length} 项日程，${events.slice(0, 3).map((event) => event.title).join("、")}` : "暂无日程";
+      button.title = `${day}，${summary}`;
+      button.setAttribute("aria-label", button.title);
+      button.append(el("span", "overview-month-number", Number(day.slice(-2))));
+      if (events.length) {
+        const marker = el("span", "overview-month-marker");
+        marker.setAttribute("aria-hidden", "true");
+        button.append(marker, el("span", "overview-month-preview", events[0].title));
+        if (events.length > 1) button.append(el("span", "overview-month-more", `+${events.length - 1}`));
+      }
+      grid.append(button);
+    }
+    return [weekdays, grid];
+  }
+
+  function weekColumns(month) {
+    const { start, end } = viewRange(state.date, "week");
+    const last = addDays(end, -1);
+    const format = (date, year) => new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "UTC", ...(year ? {year: "numeric"} : {}), month: "short", day: "numeric"
+    }).format(new Date(date + "T12:00:00Z"));
+    $("overview-month-title").textContent = format(start, true) + " – " + format(last, start.slice(0, 4) !== last.slice(0, 4));
+    const grid = el("div", "week-columns");
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-labelledby", "overview-month-title");
+    const today = dateKey();
+    let count = 0;
+    for (let day = start; day < end; day = addDays(day, 1)) {
+      const events = month.byDay?.get(day) || [];
+      const tasks = state.tasks.filter(task => !task.completed && task.due_date === day);
+      const column = el("div", "week-column");
+      const header = el("button", "week-day");
+      header.type = "button";
+      header.dataset.date = day;
+      header.setAttribute("aria-pressed", String(day === state.date));
+      header.setAttribute("aria-label", prettyDate(day, true));
+      if (day === today) header.setAttribute("aria-current", "date");
+      const weekday = new Intl.DateTimeFormat("zh-CN", {weekday: "short", timeZone: "UTC"}).format(new Date(day + "T12:00:00Z"));
+      header.append(el("span", "week-name", weekday), el("strong", "", day.slice(-2)));
+      column.append(header);
+      for (const event of events) {
+        const card = el("button", event.all_day ? "board-note all-day-note" : "board-note");
+        card.type = "button";
+        const time = event.all_day ? "全天" : day > dateKey(event.start) ? "跨天" : formatTime(event.start);
+        card.append(el("small", "", time), el("strong", "", event.title));
+        card.addEventListener("click", () => openEvent(event));
+        column.append(card);
+      }
+      for (const task of tasks) {
+        const card = el("button", "board-note due-note");
+        card.type = "button";
+        card.append(el("small", "", "待办到期"), el("strong", "", task.title));
+        card.addEventListener("click", () => openTaskEdit(task));
+        column.append(card);
+      }
+      count += events.length + tasks.length;
+      grid.append(column);
+    }
+    if (count || !month.byDay) return [grid];
+    return [grid, el("p", "week-empty", "本周暂无日程或到期待办")];
+  }
+
+  function loadOverviewMonth(refresh = false) {
+    const zone = timezone(), key = `${zone}/${state.date.slice(0, 7)}`;
+    if (!refresh && overviewMonth?.key === key) {
+      renderOverviewMonth(overviewMonth);
+      return overviewMonth.pending;
+    }
+    const month = { key, range: viewRange(state.date, "month"), byDay: null, error: null };
+    overviewMonth = month;
+    renderOverviewMonth(month);
+    month.pending = readEventRange(month.range).then((events) => {
+      if (overviewMonth === month) month.byDay = indexMonthEvents(events, month.range, zone);
+    }).catch((error) => { month.error = error; }).finally(() => {
+      if (overviewMonth === month && state.view === "overview") renderOverviewMonth(month);
+    });
+    return month.pending;
+  }
+  async function loadData(refreshMonth = true) {
     const request = ++state.dataRequest;
-    const data = await api(`/api/overview?${new URLSearchParams({ date: state.date })}`);
+    if (refreshMonth) overviewMonth = null;
+    const showMonth = state.view === "overview" && (!VIEW_NAMES[location.hash.slice(1)] || location.hash === "#overview");
+    const monthRead = showMonth ? loadOverviewMonth() : null;
+    let data;
+    try { data = await api(`/api/overview?${new URLSearchParams({ date: state.date })}`); }
+    catch (error) { if (request !== state.dataRequest) return; throw error; }
     if (request !== state.dataRequest) return;
     state.overview = data; state.tasks = data.tasks || []; state.deletedTasks = data.deleted_tasks || []; state.memories = data.memories || [];
     renderOverview();
     if (state.view === "calendar") await loadCalendar();
     if (state.view === "knowledge" && knowledgeUI) await knowledgeUI.load();
+    await monthRead;
   }
   async function refreshAfterWrite(message) {
     try { await loadData(); showError("global-error", null); toast(message); }
@@ -459,7 +610,7 @@
     const welcome = el("div", "chat-welcome");
     welcome.append(el("h3", "", "从一个问题开始"), el("p", "", "查日程、导入资料、设置提醒，也可以整理待办。"));
     const prompts = el("div", "prompt-chips");
-    [{ label: "查询今天的日程", prompt: "今天有什么安排？" }, { label: "导入链接", prompt: "导入链接：" }, { label: "设置提醒", prompt: "明天15:00提醒我整理资料" }].forEach(({ label, prompt }) => {
+    [{ label: "帮我规划今天", prompt: "帮我规划今天" }, { label: "查询今天的日程", prompt: "今天有什么安排？" }, { label: "导入链接", prompt: "导入链接：" }, { label: "设置提醒", prompt: "明天15:00提醒我整理资料" }].forEach(({ label, prompt }) => {
       const button = el("button", "prompt-chip", label); button.type = "button";
       button.addEventListener("click", () => { $("chat-input").value = prompt; $("chat-input").focus(); }); prompts.append(button);
     });
@@ -583,6 +734,7 @@
   function actionDetails(action,target=savedActionTarget(action)) {
     const args=action.arguments||{};
     const review=ChatFiles.reviewLines(action); if(review!==null)return review;
+    if (action.tool === "assistant_schedule_task") return [args.title, actionTime(args), timezoneLabel(args.timezone)].join("\n");
     if(action.tool==="calendar_set_preferences"){
       const labels={timezone:"时区",workdays:"工作日",work_start:"开始工作",work_end:"结束工作",lunch_start:"午休开始",lunch_end:"午休结束",buffer_minutes:"日程间隔"};
       return Object.entries(args).filter(([key])=>labels[key]).map(([key,value])=>`${labels[key]}：${key==="timezone"?timezoneLabel(value):key==="workdays"?value.map(day=>"周"+["一","二","三","四","五","六","日"][day]).join("、"):key==="buffer_minutes"?value+" 分钟":value}`).join("\n");
@@ -607,8 +759,99 @@
     if(args.task_id)return target?"待办："+target.title:action.status==="applied"?"已完成这项待办操作。":"这项待办已不可用，请重新确认。";
     return "请核对后确认。";
   }
+  function showTimeRevision(card, action, target) {
+    const original = action.arguments.changes ? {...target, ...action.arguments.changes} : action.arguments;
+    const zone = original.timezone || timezone();
+    const form = el("form", "action-revision");
+    const inputs = {};
+    for (const [key, caption] of [["start", "新开始时间"], ["end", "新结束时间"]]) {
+      const label = el("label", "field is-block");
+      label.append(el("span", "label", caption));
+      const input = el("input", "input is-small");
+      input.required = true;
+      input.type = original.all_day ? "date" : "datetime-local";
+      const value = original[key];
+      if (value) {
+        const local = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? localInput(value, zone) : value;
+        input.value = local.slice(0, original.all_day ? 10 : 16);
+      }
+      label.append(input); form.append(label); inputs[key] = input;
+    }
+    const submit = el("button", "button is-small is-primary", "生成改期草案");
+    submit.type = "submit";
+    const feedback = el("p", "inline-error");
+    form.append(el("p", "field-help", timezoneLabel(zone) + (original.all_day ? " · 结束日期不含当天" : "")), submit, feedback);
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      await busy(submit, async () => {
+        try {
+          const result = await api(`/api/actions/${encodeURIComponent(action.id)}/revise-time`, {
+            method: "POST", body: {start: inputs.start.value, end: inputs.end.value}
+          });
+          if (state.sessionId === action.session_id) {
+            if (!state.actions.some(item => item.id === result.action.id)) state.actions.push(result.action);
+            renderChat();
+            $("action-" + result.action.id)?.focus();
+          }
+          toast("改期草案已生成，请核对后确认");
+        } catch (error) { feedback.textContent = explainError(error); }
+      });
+    });
+    card.append(form);
+    inputs.start.focus();
+  }
+
+  function actionFollowUp(card, action) {
+    const errorCode = action.result?.error?.code;
+    const calendarEdit = ["calendar_create_event", "calendar_update_event"].includes(action.tool);
+    if (action.status === "failed" && errorCode === "conflict" && calendarEdit &&
+        !state.actions.some(item => item.replaces_id === action.id)) {
+      const revise = el("button", "button is-light is-small", "重新选时间");
+      revise.type = "button";
+      revise.addEventListener("click", async () => {
+        revise.disabled = true;
+        try {
+          const target = action.arguments.event_id ? await readActionTarget(action) : null;
+          if (card.isConnected) { revise.remove(); showTimeRevision(card, action, target); }
+        } catch (error) { toast(explainError(error), true); revise.disabled = false; }
+      });
+      card.append(revise);
+    }
+    if (action.status === "unknown" && (action.tool.startsWith("calendar_") || action.tool === "assistant_sync_calendar")) {
+      const sync = action.tool === "assistant_sync_calendar";
+      const check = el("button", "button is-light is-small", sync ? "查看同步记录" : "查看日历核对");
+      check.type = "button";
+      check.addEventListener("click", () => {
+        setChatCollapsed(true);
+        const target = {...savedActionTarget(action), ...action.arguments, ...action.arguments.changes};
+        if (!sync && target.start) {
+          const day = /(?:Z|[+-]\d{2}:\d{2})$/.test(target.start) ? eventDay(target) : target.start.slice(0, 10);
+          setDate(day);
+        }
+        setView(sync ? "automation" : "calendar");
+      });
+      card.append(check);
+    }
+  }
+
+  async function openActionInChat(sessionId, actionId) {
+    if (state.chatBusy || chatDraft.uploading) { toast("请等待当前对话完成"); return; }
+    try {
+      await selectSession(sessionId);
+      if (state.sessionId !== sessionId) return;
+      $("session-select").value = sessionId;
+      setChatCollapsed(false);
+      requestAnimationFrame(() => {
+        const card = $("action-" + actionId);
+        if (card) { card.scrollIntoView({block:"center"}); card.focus({preventScroll:true}); }
+      });
+    } catch (error) { toast(explainError(error), true); }
+  }
+
   function renderAction(action) {
     const card = el("article", "action-card"); const status = action.status || "pending"; const args=action.arguments||{};
+    card.id = "action-" + action.id; card.tabIndex = -1;
     const statusText = { pending: "等待确认", applied: "已完成", failed: "操作未完成", unknown: "结果待确认，请勿重复操作" }[status] || status;
     const detail=el("div", "action-detail", actionDetails(action));
     card.append(el("div", "action-status", statusText), el("h4", "", action.title || args.review && args.review.title || "待确认操作"), detail);
@@ -642,14 +885,24 @@
           renderChat();
         } catch (error) {
           if (error.code === "confirmation_required") { feedback.textContent=explainError(error);feedback.hidden=false;return; }
+          const uncertain = ["unknown_outcome", "unknown_result", "write_outcome_unknown", "connection_failed", "invalid_response", "storage_unavailable", "internal_error"].includes(error.code);
           if (error.details && error.details.action) Object.assign(action, error.details.action);
-          else if (error.code !== "connection_failed") Object.assign(action, { status: ["unknown_outcome", "unknown_result", "write_outcome_unknown"].includes(error.code) ? "unknown" : "failed", result: { error } });
-          if (state.sessionId) { try { await selectSession(state.sessionId); } catch (_) { /* Keep the write error visible until its saved state can be read. */ } }
-          if (action.status === "pending") { action.status = "unknown"; action.result = { error: { message: "暂时无法确认结果。恢复连接后，请重新打开对话查看，不要重复操作。" } }; }
+          else Object.assign(action, {status: uncertain ? "unknown" : "failed", result: {error}});
+          if (state.sessionId === action.session_id) {
+            try {
+              await selectSession(action.session_id);
+              const current = state.actions.find(item => item.id === action.id);
+              if (uncertain && current?.status === "pending") {
+                current.status = "unknown";
+                current.result = {error:{message:"暂时无法确认结果，请先核对实际日程或记录。"}};
+              }
+            } catch (_) { /* Keep the visible outcome until the persisted state can be read. */ }
+          }
           renderChat();
-        } finally { applying=false;enable(); }
+        } finally { applying=false;enable(); if (state.view === "automation" && integrationsUI) integrationsUI.progress(); }
       }); card.append(feedback,button);
     } else if (action.result) { const text = action.result.error ? explainError(action.result.error) : "操作已完成。"; card.append(el("p", `action-result${action.result.error ? " failed" : ""}`, text)); }
+    actionFollowUp(card, action);
     return card;
   }
   function renderChat() {
@@ -658,6 +911,13 @@
       const files = el("details", "chat-session-files"); files.append(el("summary", "", `本次对话的文件（${state.sessionAttachments.length}）`));
       state.sessionAttachments.forEach(attachment => files.append(attachmentRow(attachment))); stream.append(files);
     }
+    const actionsByRun = new Map();
+    const renderedActions = new Set();
+    for (const action of state.actions) {
+      if (!action.run_id) continue;
+      if (!actionsByRun.has(action.run_id)) actionsByRun.set(action.run_id, []);
+      actionsByRun.get(action.run_id).push(action);
+    }
     if (!state.messages.length) stream.append(chatWelcome());
     else state.messages.forEach((message) => { const row = el("div", `chat-message ${message.role === "user" ? "user" : "assistant"}`), label = el("div", "message-label", message.role === "user" ? "我" : "助手"); row.append(label, el("div", "message-bubble", message.content || ""));
       if (message.sources && message.sources.length) {
@@ -665,8 +925,12 @@
         message.sources.forEach((source) => { const link = el("button", "source-reference", source.title); link.type = "button"; link.addEventListener("click", () => qualityUI.citation(source)); refs.append(link); }); row.append(refs);
       }
       if (message.role === "assistant" && message.id && qualityUI) row.append(qualityUI.answerControls(message,state.sessionId,state.feedbackByMessage[message.id]));
-      stream.append(row); });
-    state.actions.forEach((action) => stream.append(renderAction(action)));
+      stream.append(row);
+      for (const action of actionsByRun.get(message.run_id) || []) {
+        stream.append(renderAction(action)); renderedActions.add(action.id);
+      }
+    });
+    state.actions.filter(action => !renderedActions.has(action.id)).forEach(action => stream.append(renderAction(action)));
     if (state.chatBusy) { const pending = el("div", "chat-message pending"); pending.append(el("div", "message-label", "助手"), el("div", "message-bubble", "正在处理…")); stream.append(pending); }
     stream.scrollTop = stream.scrollHeight;
   }
@@ -679,7 +943,7 @@
       const body = { message, project_id: state.chatProjectId }; if (state.sessionId) body.session_id = state.sessionId; if (state.model) body.model = state.model; if (attachments.length) body.attachment_ids = attachments.map(item=>item.id);
       const result = await api("/api/chat", { method: "POST", body }); state.sessionId = result.session_id;
       state.sessionAttachments = Array.isArray(result.attachments) ? result.attachments : ChatFiles.merge(state.sessionAttachments, attachments);
-      state.messages.push({ id:result.message_id, role: "assistant", content: result.reply || "已处理这条请求。", sources: result.sources || [] }); state.actions.push(...(result.actions || []));
+      state.messages.push({ id:result.message_id, run_id:result.run_id, role: "assistant", content: result.reply || "已处理这条请求。", sources: result.sources || [] }); state.actions.push(...(result.actions || []));
       chatDraft.reset(); renderChatDraft();
       try { await loadSessions(); } catch (error) { toast("消息已处理，对话列表暂未刷新", true); }
     } catch (error) { state.messages = previous; input.value = original; showError("chat-error", error); }
@@ -791,12 +1055,49 @@
     document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $(button.dataset.closeDialog).close()));
     document.querySelectorAll("[data-date-step]").forEach((button) => button.addEventListener("click", () => changeDate(addDays(state.date, Number(button.dataset.dateStep)))));
     ["overview-date", "calendar-date"].forEach((id) => $(id).addEventListener("change", (event) => changeDate(event.target.value)));
+    $("overview-month-board").addEventListener("click", (event) => {
+      const button = event.target.closest(".overview-month-date, .week-day");
+      if (!button) return;
+      changeDate(button.dataset.date);
+      if (window.matchMedia("(max-width: 960px)").matches) {
+        const heading = $("overview-agenda-heading");
+        heading.focus({ preventScroll: true });
+        heading.scrollIntoView({ behavior: "instant", block: "start" });
+      }
+    });
+    $("overview-back-to-month").addEventListener("click", () => {
+      const selected = $("overview-month-board").querySelector('[aria-pressed="true"]');
+      if (!selected) return;
+      selected.focus({ preventScroll: true });
+      selected.scrollIntoView({ behavior: "instant", block: "center" });
+    });
+    document.querySelectorAll("[data-board-mode]").forEach(button => {
+      button.addEventListener("click", () => {
+        boardMode = button.dataset.boardMode;
+        document.querySelectorAll("[data-board-mode]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
+        if (state.date) loadOverviewMonth();
+      });
+    });
+    const stepBoard = delta => {
+      if (state.date) changeDate(boardMode === "week" ? addDays(state.date, 7 * delta) : shiftMonth(state.date, delta));
+    };
+    $("overview-month-prev").addEventListener("click", () => stepBoard(-1));
+    $("overview-month-next").addEventListener("click", () => stepBoard(1));
+    $("overview-month-today").addEventListener("click", () => changeDate(dateKey()));
     $("today-button").addEventListener("click", () => changeDate(dateKey()));
     $("calendar-prev").addEventListener("click", () => navigateCalendar(-1));
     $("calendar-next").addEventListener("click", () => navigateCalendar(1));
     $("calendar-today").addEventListener("click", () => changeDate(dateKey()));
     document.querySelectorAll("[data-calendar-mode]").forEach((button) => button.addEventListener("click", () => { state.calendarMode = button.dataset.calendarMode; document.querySelectorAll("[data-calendar-mode]").forEach((node) => { const active = node === button; node.classList.toggle("is-selected", active); node.setAttribute("aria-pressed", active); }); loadCalendar().catch((error) => showError("global-error", error)); }));
-    $("refresh-button").addEventListener("click", () => busy($("refresh-button"), async () => { try { await loadData(); if (state.sessionId && !state.chatBusy) await selectSession(state.sessionId); showError("global-error", null); toast("已刷新"); } catch (error) { showError("global-error", error); } }));
+    $("refresh-button").addEventListener("click", () => busy($("refresh-button"), async () => {
+      try {
+        await loadData();
+        if (state.sessionId && !state.chatBusy) await selectSession(state.sessionId);
+        showError("global-error", null);
+        if (state.view === "overview" && overviewMonth?.error) toast("日程读取失败，可在计划板下方重试。", true);
+        else toast("已刷新");
+      } catch (error) { showError("global-error", error); }
+    }));
     $("overview-free-button").addEventListener("click", () => { setView("calendar"); $("free-slots-surface").open = true; $("free-slots-surface").scrollIntoView({ behavior: "instant", block: "center" }); });
     $("event-form").addEventListener("submit", saveEvent); $("event-all-day").addEventListener("change", eventTimeInputs);
     $("confirm-action").addEventListener("click", () => busy($("confirm-action"), async () => { try { if (state.confirm) await state.confirm(); $("confirm-dialog").close(); } catch (error) { showError("confirm-error", error); if (["unknown_outcome", "unknown_result", "write_outcome_unknown"].includes(error.code)) { $("confirm-action").dataset.locked = "true"; $("confirm-action").textContent = "结果需核查"; } } }));
@@ -841,7 +1142,26 @@
     $("session-select").addEventListener("change", (event) => { selectSession(event.target.value).catch((error) => showError("chat-error", error)); });
     document.querySelector(".brand").addEventListener("click", (event) => { event.preventDefault(); setView("overview"); });
   }
-  async function changeDate(value) { setDate(value); try { await loadData(); showError("global-error", null); } catch (error) { showError("global-error", error); } }
+  async function changeDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
+    const changed = value !== state.date;
+    setDate(value);
+    if (changed) {
+      $("event-count").textContent = "—";
+      $("overview-events").replaceChildren(el("p", "empty-detail", "正在读取日程…"));
+      $("next-event").replaceChildren(el("span", "next-event-empty", "正在读取安排…"));
+    }
+    const pending = loadData(false), request = state.dataRequest;
+    try { await pending; if (request === state.dataRequest) showError("global-error", null); }
+    catch (error) {
+      if (request !== state.dataRequest) return;
+      if (changed) {
+        $("overview-events").replaceChildren(el("p", "empty-detail", "日程读取失败，请刷新重试。"));
+        $("next-event").replaceChildren(el("span", "next-event-empty", "暂时无法读取安排"));
+      }
+      showError("global-error", error);
+    }
+  }
   async function boot() {
     decorateIcons(); bindEvents(); initializeChatLayout(); renderChatDraft(); updateChatControls(); renderChat();
     try { const bootstrap = await api("/api/bootstrap"); state.token = bootstrap.token || bootstrap.csrf_token || ""; state.status = bootstrap.status; state.prefs = bootstrap.preferences || {}; state.cloudMode = bootstrap.deployment?.mode === "cloud"; $("cloud-session").hidden = !state.cloudMode;
@@ -850,7 +1170,7 @@
         onProjects(projects) { const select = $("chat-project"); select.replaceChildren(); const first = el("option", "", "不限定项目"); first.value = ""; select.append(first); projects.forEach((project) => { const option = el("option", "", project.name); option.value = project.id; select.append(option); }); if (!projects.some(p => p.id === state.chatProjectId)) state.chatProjectId = null; select.value = state.chatProjectId || ""; },
         onAsk(projectId, query) { if (state.chatBusy || chatDraft.uploading) { toast("请等待当前对话完成"); return; } resetChatDraft(); state.sessionAttachments=[]; state.sessionId = null; state.sessionRequest++; state.messages = []; state.actions = []; state.chatProjectId = projectId; $("session-select").value = ""; $("chat-project").value = projectId || ""; renderChat(); setChatCollapsed(false); $("chat-input").value = query; $("chat-input").focus(); }
       }); knowledgeUI.bind(); await knowledgeUI.load();
-      integrationsUI = new IntegrationsUI({api,el,busy,showError,toast,confirmOperation,timezone,today:()=>dateKey(),addDays,refreshData:loadData,onRuntime(runtime,caldav){state.runtimeInfo=runtime;state.caldavSettings=caldav;renderStatus();setChatMode();}});
+      integrationsUI = new IntegrationsUI({onOpenAction:openActionInChat,onDemandReminders:bootstrap.deployment?.reminders === "on_demand",api,el,busy,showError,toast,confirmOperation,timezone,today:()=>dateKey(),addDays,refreshData:loadData,onRuntime(runtime,caldav){state.runtimeInfo=runtime;state.caldavSettings=caldav;renderStatus();setChatMode();}});
       qualityUI = new QualityUI({api,el,busy,showError,toast,openSource:id=>knowledgeUI.openSource(id),
         onFeedback(record){if(state.sessionId===record.session_id){state.feedbackByMessage[record.message_id]=record;renderChat();}if(state.view==="quality")qualityUI.load().catch(error=>showError("quality-error",error));},
         async onOpenSession(id){try{await selectSession(id);setChatCollapsed(false);}catch(error){showError("quality-error",error);}}

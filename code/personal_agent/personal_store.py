@@ -44,9 +44,16 @@ class PersonalStore:
                 CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,title TEXT NOT NULL,due_date TEXT,completed INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,source_action_id TEXT UNIQUE);
                 CREATE TABLE IF NOT EXISTS memories(id TEXT PRIMARY KEY,content TEXT NOT NULL,created_at TEXT NOT NULL,source_action_id TEXT UNIQUE);
                 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS day_plan_choices(session_id TEXT PRIMARY KEY, state TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS message_session ON messages(session_id,id);
             """)
             conn.execute("BEGIN IMMEDIATE")
+            action_columns = {row["name"] for row in conn.execute("PRAGMA table_info(actions)")}
+            for column in ("run_id", "resolved_at", "replaces_id"):
+                if column not in action_columns:
+                    conn.execute("ALTER TABLE actions ADD COLUMN " + column + " TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS action_run ON actions(run_id) WHERE run_id IS NOT NULL")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS action_replacement ON actions(replaces_id) WHERE replaces_id IS NOT NULL")
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
             for name, definition in (("version", "INTEGER NOT NULL DEFAULT 1"), ("deleted_at", "TEXT")):
                 if name not in columns:
@@ -117,8 +124,11 @@ class PersonalStore:
         value["result"] = json.loads(value["result"]) if value["result"] else None
         return value
 
-    def create_action(self, session_id, tool, arguments, title=None):
-        self.get_session(session_id)
+    def create_action(self, session_id, tool, arguments, title=None, *, run_id=None, connection=None, replaces_id=None):
+        if connection is None:
+            self.get_session(session_id)
+            with self.connection() as connection:
+                return self.create_action(session_id, tool, arguments, title, run_id=run_id, connection=connection, replaces_id=replaces_id)
         tool = checked_text(tool, "tool", 100)
         if not isinstance(arguments, dict):
             raise AgentError("validation_error", "操作参数必须是对象")
@@ -128,11 +138,20 @@ class PersonalStore:
             arguments["request_id"] = action_id
         row = {"id": action_id, "session_id": session_id, "tool": tool,
                "arguments": json.dumps(arguments, ensure_ascii=False), "title": checked_text(title or tool, "title", 300),
-               "status": "pending", "result": None, "created_at": now()}
+               "status": "pending", "result": None, "created_at": now(), "run_id": run_id, "resolved_at": None, "replaces_id": replaces_id}
         if len(row["arguments"]) > 20000:
             raise AgentError("validation_error", "操作参数过长")
-        with self.connection() as c:
-            c.execute("INSERT INTO actions VALUES(:id,:session_id,:tool,:arguments,:title,:status,:result,:created_at)", row)
+        if replaces_id:
+            existing = connection.execute("SELECT * FROM actions WHERE replaces_id=?", (replaces_id,)).fetchone()
+            if existing:
+                previous = self.action_dict(existing)
+                previous_args = dict(previous["arguments"])
+                previous_args["request_id"] = action_id
+                if previous_args != arguments:
+                    raise AgentError("action_unavailable", "已为这次冲突生成改期草案，请刷新对话核对")
+                return previous
+        connection.execute("""INSERT INTO actions(id,session_id,tool,arguments,title,status,result,created_at,run_id,replaces_id)
+                         VALUES(:id,:session_id,:tool,:arguments,:title,:status,:result,:created_at,:run_id,:replaces_id)""", row)
         return self.action_dict(row)
 
     def get_action(self, action_id):
@@ -146,9 +165,32 @@ class PersonalStore:
         with self.connection() as c:
             return [self.action_dict(r) for r in c.execute("SELECT * FROM actions WHERE session_id=? ORDER BY created_at", (session_id,))]
 
+    def outcomes_by_run(self, run_ids):
+        """Read canonical action states without exposing tool arguments or saved payloads."""
+        if not run_ids:
+            return {}
+        placeholders = ",".join("?" for _ in run_ids)
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"""SELECT id,run_id,title,status,resolved_at,
+                           CASE WHEN status IN ('failed','unknown') THEN result END AS failure
+                    FROM actions WHERE run_id IN ({placeholders}) ORDER BY created_at, rowid""",
+                run_ids,
+            ).fetchall()
+        outcomes = {}
+        for row in rows:
+            item = dict(row)
+            run_id = item.pop("run_id")
+            failure = item.pop("failure")
+            if failure:
+                error = json.loads(failure).get("error", {})
+                item["error"] = {key: error[key] for key in ("code", "message") if key in error}
+            outcomes.setdefault(run_id, []).append(item)
+        return outcomes
+
     def finish_action(self, action_id, status, result):
         with self.connection() as c:
-            c.execute("UPDATE actions SET status=?,result=? WHERE id=?", (status, json.dumps(result, ensure_ascii=False), action_id))
+            c.execute("UPDATE actions SET status=?,result=?,resolved_at=? WHERE id=?", (status, json.dumps(result, ensure_ascii=False), now(), action_id))
         return self.get_action(action_id)
 
     @staticmethod

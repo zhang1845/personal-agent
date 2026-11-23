@@ -8,7 +8,7 @@ class IntegrationsUI {
   async load() {
     const [data,cal,runtime,runs]=await Promise.all([this.api("/api/automations"),this.api("/api/caldav"),this.api("/api/runtime"),this.api("/api/agent-runs")]);
     this.jobs=data.jobs;this.notification=data.notifications;this.caldav=cal.settings;
-    const stopped=this.jobs.some(job=>job.enabled)&&!runtime.scheduler_running;
+    const stopped=this.jobs.some(job=>job.enabled)&&!runtime.scheduler_running&&!this.onDemandReminders;
     this.n("automation-notice").hidden=!stopped;
     this.n("automation-notice").textContent=stopped?"定时计划已停止，摘要和提醒暂不会自动发送。请重新启动工作台。":"";
     this.onRuntime(runtime,cal.settings);
@@ -26,13 +26,83 @@ class IntegrationsUI {
     const target=this.n("automation-list");target.replaceChildren();
     if(!this.jobs.length)target.append(this.el("p","library-empty","暂无定时计划。"));
     const labels={daily_summary:"每日摘要",task_digest:"到期待办",event_reminders:"日程提醒",one_time:"一次性提醒",daily_reminder:"定时提醒"};
-    this.jobs.forEach(job=>{const row=this.el("div","integration-row");const text=this.el("div","integration-row-main");text.append(this.el("h3","",job.name),this.el("p","field-help",`${labels[job.kind] || "提醒"} · ${job.kind==="event_reminders"?"提前 "+job.lead_minutes+" 分钟":job.kind==="one_time"?this.stamp(job.run_at):job.time} · ${job.enabled?"已启用":"已暂停"}`));row.append(text,this.button(job.enabled?"暂停":"启用",()=>this.safely(row.querySelector("button"),async()=>{const {id,version,...body}=job;await this.api(`/api/automations/${id}`,{method:"PATCH",body:{...body,enabled:!job.enabled,expected_version:version}});await this.load();})),this.button("删除",()=>this.confirmOperation("删除定时计划",job.name+"\n仅删除计划，不删除已有消息。","删除计划",async()=>{await this.api(`/api/automations/${job.id}`,{method:"DELETE",body:{expected_version:job.version}});await this.load();})));target.append(row);});
+    this.jobs.forEach(job => {
+      const row = this.el("div", "integration-row");
+      const text = this.el("div", "integration-row-main");
+      const passed = job.kind === "one_time" && !job.enabled && Date.parse(job.run_at) <= Date.now();
+      const when = job.kind === "event_reminders" ? "提前 " + job.lead_minutes + " 分钟"
+        : job.kind === "one_time" ? this.stamp(job.run_at) : job.time;
+      text.append(this.el("h3", "", job.name), this.el("p", "field-help",
+        [labels[job.kind] || "提醒", when, passed ? "已结束" : job.enabled ? "已启用" : "已暂停"].join(" · ")));
+      row.append(text);
+      if (passed) {
+        this.addRescheduleForm(text, job, "plan");
+      } else {
+        const toggle = this.button(job.enabled ? "暂停" : "启用", () => this.safely(toggle, async () => {
+          const {id, version, ...body} = job;
+          await this.api(`/api/automations/${id}`, {method:"PATCH", body:{...body, enabled:!job.enabled, expected_version:version}});
+          await this.load();
+        }));
+        row.append(toggle);
+      }
+      row.append(this.button("删除", () => this.confirmOperation("删除定时计划",
+        job.name + "\n仅删除计划，不删除已有消息。", "删除计划", async () => {
+          await this.api(`/api/automations/${job.id}`, {method:"DELETE", body:{expected_version:job.version}});
+          await this.load();
+        })));
+      target.append(row);
+    });
   }
   renderInbox(items) {
     const target=this.n("notification-inbox");target.replaceChildren();const count=items.filter(n=>!n.read).length;this.n("inbox-count").textContent=count;this.n("inbox-count").hidden=!count;
     if(!items.length)target.append(this.el("p","library-empty","暂无消息。"));
-    const labels={in_app:"工作台消息",sent:"已提交发送",unknown:"结果待确认，请到接收应用查看",expired:"已过期，未发送",queued:"等待发送",sending:"正在发送"};
-    items.forEach(item=>{const row=this.el("article","integration-row inbox-row"+(item.read?" is-read":""));const main=this.el("div","integration-row-main");main.append(this.el("h3","",item.title),this.el("p","source-meta",`${this.stamp(item.created_at)} · ${labels[item.state]||item.state}`),this.el("p","notification-body",item.body));row.append(main);if(!item.read)row.append(this.button("标为已读",()=>this.safely(row.querySelector("button"),async()=>{await this.api(`/api/notifications/${item.id}/read`,{method:"POST",body:{}});await this.load();})));target.append(row);});
+    const labels = {in_app:"工作台消息", sent:"已提交发送", unknown:"结果待确认，请到接收应用查看", expired:"已过期，未发送", missed:"已错过", queued:"等待发送", sending:"正在发送"};
+    items.forEach(item => {
+      const row = this.el("article", "integration-row inbox-row" + (item.read ? " is-read" : ""));
+      const main = this.el("div", "integration-row-main");
+      main.append(this.el("h3", "", item.title),
+        this.el("p", "source-meta", this.stamp(item.created_at) + " · " + (labels[item.state] || item.state)),
+        this.el("p", "notification-body", item.body));
+      row.append(main);
+      if (item.state === "missed") {
+        const job = this.jobs.find(j => j.id === item.job_id && j.version === item.missed_version && !j.enabled);
+        if (job) this.addRescheduleForm(main, job);
+      }
+      if (!item.read) {
+        const read = this.button("标为已读", () => this.safely(read, async () => {
+          await this.api(`/api/notifications/${item.id}/read`, {method:"POST", body:{}});
+          await this.load();
+        }));
+        row.append(read);
+      }
+      target.append(row);
+    });
+  }
+  addRescheduleForm(parent, job, section = "inbox") {
+    const details = this.el("details", "reminder-reschedule");
+    const form = this.el("form", "");
+    const label = this.el("label", "label", "新的提醒时间（" + this.timezone() + "）");
+    const input = this.el("input", "input");
+    input.type = "datetime-local";
+    input.id = "reschedule-" + section + "-" + job.id;
+    input.required = true;
+    label.htmlFor = input.id;
+    const save = this.el("button", "button is-small is-primary", "保存新时间");
+    save.type = "submit";
+    form.append(label, input, save);
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      this.safely(save, async () => {
+        const {id, version, ...fields} = job;
+        await this.api(`/api/automations/${id}`, {method:"PATCH", body:{
+          ...fields, run_at:input.value, enabled:true, expected_version:version
+        }});
+        this.toast("提醒时间已更新");
+        await this.load();
+      });
+    });
+    details.append(this.el("summary", "", "重新安排"), form);
+    parent.append(details);
   }
   renderCalDAV(data) {
     const conflicts=this.n("caldav-conflicts");conflicts.replaceChildren();
@@ -41,9 +111,37 @@ class IntegrationsUI {
     data.operations.slice().reverse().forEach(op=>{const row=this.el("div","integration-row");const main=this.el("div","integration-row-main");main.append(this.el("p","",`${op.kind==="put"?"日历写入":"日历删除"} · ${labels[op.status]||op.status}`),this.el("p","field-help",op.error||this.stamp(op.created_at)));row.append(main);if(["unknown","sending"].includes(op.status))row.append(this.button("查看同步结果",()=>this.safely(row.querySelector("button"),async()=>{const result=await this.api(`/api/caldav/operations/${op.id}/reconcile`,{method:"POST",body:{}});await this.load();this.toast(result.confirmed?"已完成":"暂时无法确认，请到原日历查看；没有重复发送。");})));ops.append(row);});
   }
   renderRuns(runs) {
-    const target=this.n("agent-runs");target.replaceChildren();if(!runs.length)target.append(this.el("p","library-empty","暂无处理记录。"));
-    const states={running:"处理中",completed:"处理完成",failed:"处理失败",interrupted:"已中断"};
-    runs.forEach(run=>{const details=this.el("details","run-record");details.append(this.el("summary","",`${this.stamp(run.created_at)} · ${run.model} · ${states[run.state]||run.state}`));if(run.error)details.append(this.el("p","field-help",run.error));const list=this.el("ol","run-steps");run.steps.forEach(step=>list.append(this.el("li","",this.stepLabel(step.name)+" · "+({running:"开始",completed:"完成",failed:"失败",draft:"等待确认"}[step.state]||step.state))));details.append(list);if(run.usage)details.append(this.el("p","field-help",`${run.usage.requests||0} 次处理 · ${run.usage.reported?"输入 "+run.usage.input_tokens+" / 输出 "+run.usage.output_tokens+" token":"服务商未提供用量"}`));target.append(details);});
+    const target = this.n("agent-runs");
+    const expanded = new Set(Array.from(target.querySelectorAll("details[open]"), d => d.dataset.run));
+    target.replaceChildren();
+    if (!runs.length) target.append(this.el("p", "library-empty", "暂无处理记录。"));
+    const modelStates = {running:"处理中", completed:"模型已完成", failed:"模型处理失败", interrupted:"处理已中断"};
+    const actionStates = {pending:"待确认", applied:"已执行", failed:"未执行成功", unknown:"结果待核查"};
+    const stepStates = {running:"开始", completed:"完成", failed:"失败", draft:"已生成草案"};
+    for (const run of runs) {
+      const details = this.el("details", "run-record");
+      details.dataset.run = run.id;
+      details.open = expanded.has(run.id);
+      const actions = run.actions || [];
+      const counts = Object.keys(actionStates).flatMap(state => {
+        const number = actions.filter(action => action.status === state).length;
+        return number ? [number + " 项" + actionStates[state]] : [];
+      });
+      const summary = [this.stamp(run.created_at), run.model, modelStates[run.state] || run.state, ...counts];
+      details.append(this.el("summary", "", summary.join(" · ")));
+      if (run.error) details.append(this.el("p", "field-help", run.error));
+      const list = this.el("ol", "run-steps");
+      for (const step of run.steps) list.append(this.el("li", "", this.stepLabel(step.name) + " · " + (stepStates[step.state] || step.state)));
+      for (const action of actions) {
+        const row = this.el("li", "", [action.title, actionStates[action.status], action.resolved_at && this.stamp(action.resolved_at)].filter(Boolean).join(" · "));
+        if (action.error) row.append(this.el("p", "field-help", action.error.message));
+        row.append(this.button("查看对话中的操作", () => this.onOpenAction(run.session_id, action.id), "button is-ghost is-small"));
+        list.append(row);
+      }
+      details.append(list);
+      if (run.usage) details.append(this.el("p", "field-help", `${run.usage.requests || 0} 次处理 · ${run.usage.reported ? "输入 " + run.usage.input_tokens + " / 输出 " + run.usage.output_tokens + " token" : "服务商未提供用量"}`));
+      target.append(details);
+    }
   }
   stepLabel(name) {
     const labels={"模型请求":"分析请求",calendar_status:"检查日历连接",calendar_list_calendars:"查看日历",calendar_list_events:"查询日程",calendar_get_event:"读取日程",calendar_find_free_slots:"查找空闲时间",calendar_get_preferences:"读取日程偏好",calendar_set_preferences:"准备日程偏好",calendar_create_event:"准备新日程",calendar_update_event:"准备日程修改",calendar_delete_event:"准备取消日程",knowledge_list_projects:"查看项目",knowledge_project_context:"读取项目背景",knowledge_search:"检索资料",knowledge_get_source:"读取资料",assistant_list_tasks:"读取待办",assistant_list_memories:"读取记忆",assistant_add_task:"准备待办",assistant_complete_task:"准备完成待办",assistant_save_memory:"准备保存记忆",assistant_preview_link:"读取链接",assistant_list_attachments:"查看附件",assistant_read_attachment:"读取附件",assistant_list_reminders:"查看提醒",assistant_calendar_sync_status:"检查日历同步",assistant_save_import:"准备归档资料",assistant_create_reminder:"准备提醒",assistant_update_reminder:"准备修改提醒",assistant_delete_reminder:"准备删除提醒",assistant_sync_calendar:"准备同步日历"};

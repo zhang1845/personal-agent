@@ -69,6 +69,7 @@ class Application:
             self.engine = NanobotEngine(self.calendar, self.store, self.model_client, self.knowledge, workspace=data_dir / "nanobot", execution=self.execution)
         from .chat_integrations import ChatIntegrations
         self.chat_integrations = ChatIntegrations(data_dir, self.knowledge, self.importer, self.automations, self.caldav, self.calendar, self.store)
+        self.engine.task_planner = self.task_planner
         self.engine.integrations = self.chat_integrations
         from .quality import QualityStore
         self.quality = QualityStore(data_dir, self.store, self.knowledge)
@@ -101,6 +102,10 @@ class Application:
                     result = self.chat_integrations.apply(tool, args, action_id, confirmation)
                 elif tool in CALENDAR_WRITES:
                     result = self.calendar.call(tool, args)
+                elif tool == "assistant_schedule_task":
+                    from .day_planning import confirm
+                    current, _ = self.engine._now()
+                    result = confirm(self.task_planner, action_id, args, current)
                 elif tool == "assistant_add_task":
                     fields(args, {"title", "due_date"}, {"title"})
                     result = {"task": self.store.add_task(source_action_id=action_id, **args)}
@@ -121,6 +126,28 @@ class Application:
                 raise
             saved = self.store.finish_action(action_id, "applied", result)
             return {"action": saved, "result": result}
+
+    def revise_conflict(self, action_id, body):
+        """Issue a fresh reviewable draft, retaining the first attempt and its outcome."""
+        fields(body, {"start", "end"}, {"start", "end"})
+        with self.action_lock:
+            action = self.store.get_action(action_id)
+            tool = action["tool"]
+            error = (action["result"] or {}).get("error", {})
+            if action["status"] != "failed" or error.get("code") != "conflict" or tool not in (
+                "calendar_create_event", "calendar_update_event"
+            ):
+                raise AgentError("action_unavailable", "只有已确认时间冲突的日程草案可以重新选时段")
+            args = dict(action["arguments"])
+            if tool == "calendar_update_event":
+                args["changes"] = {**args["changes"], **body}
+            else:
+                args.update(body)
+            prepared = self.engine._prepare_proposal(tool, args, action["session_id"])
+            return {"action": self.store.create_action(
+                action["session_id"], tool, prepared, title=action["title"],
+                run_id=action["run_id"], replaces_id=action_id
+            )}
 
     def knowledge_route(self, method, path, query, body):
         library = self.knowledge
@@ -169,7 +196,11 @@ class Application:
             return dict(NanobotEngine.available(), active_engine="nanobot-sdk" if isinstance(self.engine,NanobotEngine) else "rules-adapter", scheduler_running=bool(self.automations.scheduler), service_pid=os.getpid(), project_root=str(PROJECT_ROOT), data_dir=str(self.data_dir), service_instance=self.service_instance)
         if path == "/api/agent-runs" and method == "GET":
             fields(query, {"session_id"})
-            return {"runs": self.execution.list(query.get("session_id"))}
+            runs = self.execution.list(query.get("session_id"))
+            outcomes = self.store.outcomes_by_run([run["id"] for run in runs])
+            for run in runs:
+                run["actions"] = outcomes.get(run["id"], [])
+            return {"runs": runs}
         if path == "/api/imports/article" and method == "POST":
             fields(body, {"url","public_dns"}, {"url"})
             return {"preview": self.importer.article(body["url"],body.get("public_dns",False))}
@@ -350,7 +381,9 @@ class Application:
             session.update(messages=store.list_messages(parts[2], 500), actions=store.list_actions(parts[2]), project_id=self.knowledge.session_project(parts[2]))
             session["attachments"] = self.chat_integrations.list_attachments(parts[2], session["project_id"])
             session['feedback'] = [f for f in self.quality.rows('feedback') if f['session_id']==parts[2]]
+            message_runs = self.quality.runs_for_messages([m["id"] for m in session["messages"] if m["role"] == "assistant"])
             for message in session["messages"]:
+                message["run_id"] = message_runs.get(message["id"])
                 message["sources"] = self.knowledge.answer_sources(message["id"])
             return session
         if method == "POST" and path == "/api/chat":
@@ -379,6 +412,8 @@ class Application:
                         self.engine.model_client = previous
                 model = checked_model(body.get("model", ""))
                 return self.chat_result(self.engine.respond(body["message"], session_id=body.get("session_id"), model=model or None, **extra))
+        if len(parts) == 4 and parts[:2] == ["api", "actions"] and parts[3] == "revise-time" and method == "POST":
+            return self.revise_conflict(parts[2], body)
         if len(parts) == 4 and parts[:2] == ["api", "actions"] and parts[3] == "apply" and method == "POST":
             fields(body, {"confirm_truncated"})
             if "confirm_truncated" in body and type(body["confirm_truncated"]) is not bool:

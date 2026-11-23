@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#f5f5f5">
+  <meta name="theme-color" content="#faf3e6">
   <title>Daynest · AI 个人工作台</title>
   <meta name="application-name" content="Daynest">
   <link rel="stylesheet" href="/vendor/bulma-1.0.4.min.css">
@@ -23,7 +23,7 @@
   <a href="#main" class="skip-link">跳到主要内容</a>
   <div class="app-shell">
     <aside class="sidebar" aria-label="工作台导航">
-      <a class="brand" href="#overview" aria-label="Daynest 首页"><span class="brand-mark" aria-hidden="true">d<span></span></span><span>Daynest</span></a>
+      <a class="brand" href="#overview" aria-label="Daynest 首页"><span class="brand-mark" aria-hidden="true"><span></span></span><span>Daynest</span></a>
       <nav class="menu main-nav" aria-label="主要导航"><ul class="menu-list"><li><button class="nav-item is-active" data-view="overview" type="button"><span data-icon="grid"></span>总览</button></li><li><button class="nav-item" data-view="calendar" type="button"><span data-icon="calendar"></span>日程</button></li><li><button class="nav-item" data-view="tasks" type="button"><span data-icon="check"></span>待办<span class="count-badge tag" id="task-nav-count">0</span></button></li><li class="nav-secondary-start"><button class="nav-item" data-view="knowledge" type="button"><span data-icon="library"></span>资料库</button></li><li><button class="nav-item" data-view="memories" type="button"><span data-icon="spark"></span>记忆</button></li><li><button class="nav-item" data-view="automation" type="button"><span data-icon="clock"></span>自动化<span class="count-badge tag" id="inbox-count" hidden>0</span></button></li><li><button class="nav-item" data-view="quality" type="button"><span data-icon="check"></span><span class="quality-nav-label">评测与反馈</span></button></li><li><button class="nav-item" data-view="settings" type="button"><span data-icon="settings"></span>设置</button></li></ul></nav>
       <div class="sidebar-bottom">
         <div class="local-badge"><span class="status-dot"></span><span id="backend-label">正在连接…</span></div>
@@ -41,22 +41,54 @@
       <div class="workspace-body">
         <main id="main" class="main-content" tabindex="-1">
           <section class="view-panel" id="view-overview" aria-labelledby="overview-title">
-            <div class="page-heading level is-mobile overview-heading"><div class="level-left"><div class="date-stamp" aria-hidden="true"><span id="overview-month">—</span><strong id="overview-day">—</strong></div><div><h1 id="overview-title">日程与待办</h1><p id="overview-date-label">正在读取日期…</p></div></div><div class="level-right"><div class="heading-actions buttons"><button class="button is-primary" data-new-event><span data-icon="plus"></span>新建日程</button></div></div></div>
-            <div class="summary-grid" aria-label="所选日期概况">
-              <div class="summary-item"><span>当日日程</span><strong id="event-count">—</strong></div>
-              <div class="summary-item"><span>未完成待办</span><strong id="open-task-count">—</strong></div>
-              <div class="summary-item"><span>已保存记忆</span><strong id="memory-count">—</strong></div>
+            <div class="page-heading level is-mobile overview-heading">
+              <div class="level-left">
+                <div>
+                  <h1 id="overview-title">日程计划板</h1>
+                  <div class="summary-grid" aria-label="所选日期概况">
+                    <span class="summary-item"><strong id="event-count">—</strong><span>项当日日程</span></span>
+                    <span class="summary-item"><strong id="open-task-count">—</strong><span>项待办</span></span>
+                    <span class="summary-item"><strong id="memory-count">—</strong><span>条记忆</span></span>
+                  </div>
+                </div>
+              </div>
+              <div class="level-right"><button class="button is-primary" data-new-event><span data-icon="plus"></span>新建日程</button></div>
             </div>
             <div class="overview-layout">
-              <article class="surface agenda-surface">
-              <div class="section-heading agenda-heading"><div><h2>当天日程</h2><p id="agenda-subtitle">所选日期的日程</p></div><div class="date-controls"><button class="button is-ghost is-small icon-button" data-date-step="-1" aria-label="前一天"><span data-icon="chevron-left"></span></button><label class="sr-only label" for="overview-date">查看日期</label><input type="date" id="overview-date" class="input is-small"><button class="button is-ghost is-small icon-button" data-date-step="1" aria-label="后一天"><span data-icon="chevron-right"></span></button><button class="button is-light is-small" id="today-button">今天</button></div></div>
-              <div id="overview-events" class="event-list" aria-live="polite"></div>
-              <div class="surface-footer"><span id="agenda-timezone">—</span><button class="button is-text is-small text-button" data-go="calendar">查看日历 <span data-icon="arrow-right"></span></button></div>
-            </article>
-              <aside class="overview-rail" aria-label="安排与待办">
-                <article class="surface next-event-surface"><div id="next-event" class="next-event" aria-live="polite"></div></article>
-                <article class="surface overview-task-section"><div class="section-heading"><h2>待办</h2><button class="button is-text is-small text-button" data-go="tasks" id="overview-task-link">全部待办 <span data-icon="arrow-right"></span></button></div><div id="overview-tasks" class="task-list"></div></article>
-                <button class="planning-entry" id="overview-free-button" type="button"><span class="planning-entry-icon" data-icon="clock"></span><span><strong>查找空闲时间</strong><small>按工作时段查找可用时间</small></span><span data-icon="arrow-right"></span></button>
+              <article class="surface month-sheet" aria-labelledby="overview-month-title">
+                <div class="month-sheet-heading">
+                  <div class="month-sheet-title"><span class="month-label" id="board-period-label">一周安排</span><h2 id="overview-month-title" aria-live="polite">正在读取日期…</h2></div>
+                  <div class="month-switcher" aria-label="计划板导航">
+                    <div class="board-modes" role="group" aria-label="计划板视图">
+                      <button type="button" data-board-mode="week" aria-pressed="true">周</button>
+                      <button type="button" data-board-mode="month" aria-pressed="false">月</button>
+                    </div>
+                    <button class="button is-light is-small" id="overview-month-today" type="button">今天</button>
+                    <button class="button is-ghost is-small icon-button" id="overview-month-prev" type="button" aria-label="上一周"><span data-icon="chevron-left"></span></button>
+                    <button class="button is-ghost is-small icon-button" id="overview-month-next" type="button" aria-label="下一周"><span data-icon="chevron-right"></span></button>
+                  </div>
+                </div>
+                <div id="overview-month-board"></div>
+                <div class="month-sheet-footer"><span id="agenda-timezone">—</span><button class="button is-text is-small text-button" data-go="calendar">打开日历 <span data-icon="arrow-right"></span></button></div>
+              </article>
+              <aside class="overview-rail" aria-label="所选日期与待办">
+                <article class="surface agenda-surface">
+                  <div class="section-heading agenda-heading">
+                    <div class="date-stamp" aria-hidden="true"><span id="overview-month">—</span><strong id="overview-day">—</strong></div>
+                    <div><h2 id="overview-agenda-heading" tabindex="-1">当天日程</h2><p id="agenda-subtitle">所选日期</p><span id="overview-date-label" class="sr-only"></span></div>
+                    <button type="button" class="button is-text is-small text-button" id="overview-back-to-month">返回计划板</button>
+                  </div>
+                  <div class="date-controls agenda-date-controls">
+                    <button class="button is-ghost is-small icon-button" data-date-step="-1" aria-label="前一天"><span data-icon="chevron-left"></span></button>
+                    <label class="sr-only" for="overview-date">查看日期</label><input type="date" id="overview-date" class="input is-small">
+                    <button class="button is-ghost is-small icon-button" data-date-step="1" aria-label="后一天"><span data-icon="chevron-right"></span></button>
+                    <button class="button is-text is-small" id="today-button">今天</button>
+                  </div>
+                  <div id="overview-events" class="event-list" aria-live="polite"></div>
+                  <div id="next-event" class="next-event" aria-live="polite"></div>
+                </article>
+                <article class="overview-task-section"><div class="section-heading"><h2>待办</h2><button class="button is-text is-small text-button" data-go="tasks" id="overview-task-link">全部待办 <span data-icon="arrow-right"></span></button></div><div id="overview-tasks" class="task-list"></div></article>
+                <button class="planning-entry" id="overview-free-button" type="button"><span class="planning-entry-icon" data-icon="clock"></span><strong>查找空闲时间</strong><span data-icon="arrow-right"></span></button>
               </aside>
             </div>
           </section>
@@ -140,11 +172,13 @@
 
         <dialog class="chat-panel" id="assistant-panel" aria-labelledby="chat-title" hidden>
           <div class="chat-heading"><div class="chat-identity"><span class="assistant-mark" data-icon="compose" aria-hidden="true"></span><div><h2 id="chat-title">助手</h2><span id="chat-mode">正在连接…</span></div></div><div class="chat-heading-actions"><button class="button is-ghost is-small icon-button" id="new-chat" title="开始新对话" aria-label="开始新对话"><span data-icon="compose"></span></button><button class="button is-ghost is-small icon-button" id="collapse-assistant" type="button" title="关闭助手" aria-label="关闭助手"><span data-icon="close"></span></button></div></div>
-          <div class="session-picker"><label for="session-select" class="sr-only label">历史对话</label><span class="select is-small is-fullwidth"><select id="session-select"><option value="">新的对话</option></select></span><span data-icon="history"></span></div>
-          <div class="chat-project-picker"><label class="label" for="chat-project">关联项目</label><span class="select is-small is-fullwidth"><select id="chat-project"><option value="">不限定项目</option></select></span></div>
+          <div class="chat-context-row">
+            <div class="session-picker"><label class="label" for="session-select">对话</label><span class="select is-small is-fullwidth"><select id="session-select"><option value="">新的对话</option></select></span></div>
+            <div class="chat-project-picker"><label class="label" for="chat-project">关联项目</label><span class="select is-small is-fullwidth"><select id="chat-project"><option value="">不限定项目</option></select></span></div>
+          </div>
           <div class="chat-stream" id="chat-stream" role="log" aria-live="polite" aria-label="对话记录"></div>
           <div class="agent-live-status" id="agent-live-status" role="status" hidden></div>
-          <div class="chat-composer"><div id="chat-error" class="inline-error" role="alert" hidden></div><div id="chat-attachments" class="chat-attachment-list" aria-label="待发送文件" hidden></div><p id="chat-upload-status" class="chat-upload-status" role="status" hidden></p><form id="chat-form"><label class="sr-only label" for="chat-input">发送消息给助手</label><textarea id="chat-input" rows="2" maxlength="8000" placeholder="输入问题、文章链接，或添加文件…" class="textarea"></textarea><input id="chat-files" type="file" accept=".pdf,.docx,.pptx,.xlsx,.txt,.md" multiple hidden><div class="composer-bottom"><button class="button is-ghost is-small chat-file-add" type="button" id="add-chat-file" aria-controls="chat-files">添加文件</button><span>Enter 发送</span><button class="button is-primary is-small send-button" type="submit" id="send-message" aria-label="发送消息"><span data-icon="arrow-up"></span></button></div></form><p>每次最多 5 个文件，每个不超过 8 MB。保存、提醒和同步需确认。</p></div>
+          <div class="chat-composer"><div id="chat-error" class="inline-error" role="alert" hidden></div><div id="chat-attachments" class="chat-attachment-list" aria-label="待发送文件" hidden></div><p id="chat-upload-status" class="chat-upload-status" role="status" hidden></p><form id="chat-form"><label class="sr-only label" for="chat-input">发送消息给助手</label><textarea id="chat-input" rows="2" maxlength="8000" placeholder="输入问题、文章链接，或添加文件…" class="textarea"></textarea><input id="chat-files" type="file" accept=".pdf,.docx,.pptx,.xlsx,.txt,.md" multiple hidden><div class="composer-bottom"><button class="button is-ghost is-small chat-file-add" type="button" id="add-chat-file" aria-controls="chat-files">添加文件</button><span>Enter 发送</span><button class="button is-primary is-small send-button" type="submit" id="send-message" aria-label="发送消息"><span data-icon="arrow-up"></span></button></div></form><p>附件最多 5 个，单个 ≤ 8 MB。保存、提醒和同步需确认。</p></div>
         </dialog>
       </div>
     </div>

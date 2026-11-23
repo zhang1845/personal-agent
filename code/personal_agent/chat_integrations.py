@@ -100,11 +100,11 @@ class ChatIntegrations(PersonalStore):
         self._project(project_id)
         if self.library.session_project(session_id)!=project_id:raise AgentError('validation_error','预览所属项目与对话不一致')
 
-    def set_turn(self,session_id,message,project_id=None):
+    def set_turn(self,session_id,message,project_id=None,attachment_ids=()):
         self._session(session_id,project_id)
         if not isinstance(message,str):raise AgentError('validation_error','消息无效')
         urls=set(extract_urls(message))
-        self.turns[session_id]={'project_id':project_id,'urls':urls,'message':message}
+        self.turns[session_id]={'project_id':project_id,'urls':urls,'message':message,'attachment_ids':tuple(attachment_ids)}
 
     def _save_preview(self,preview,session_id,project_id):
         self._project(project_id)

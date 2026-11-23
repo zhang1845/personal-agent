@@ -128,8 +128,25 @@ class ChatIntegrationTests(unittest.TestCase):
 
     def test_one_time_missed_more_than_five_minutes_is_disabled_without_backfill(self):
         prepared=self.reminder();job=self.chat.apply('assistant_create_reminder',prepared,'missed')['job']
-        self.automations.tick(datetime.fromisoformat(job['run_at'])+timedelta(minutes=6))
-        self.assertEqual([],self.automations.inbox());self.assertFalse(self.automations.jobs()[0]['enabled'])
+        with patch.object(self.automations, '_send') as send:
+            self.automations.tick(datetime.fromisoformat(job['run_at']) + timedelta(minutes=6))
+            self.automations.tick(datetime.fromisoformat(job['run_at']) + timedelta(minutes=10))
+            send.assert_not_called()
+        [missed] = self.automations.inbox()
+        self.assertEqual('missed', missed['state'])
+        self.assertEqual(1, missed['in_app_only'])
+        self.assertIn('原定', missed['body'])
+        [expired] = self.automations.jobs()
+        self.assertFalse(expired['enabled'])
+        self.assertEqual(expired['version'], missed['missed_version'])
+        new_time = datetime.fromisoformat(job['run_at']) + timedelta(days=1)
+        fields = {k:v for k,v in expired.items() if k not in ('id', 'version')}
+        changed = self.automations.save_job(dict(fields, enabled=True, run_at=new_time.isoformat(),
+                                                 expected_version=expired['version']), expired['id'])
+        self.assertTrue(changed['enabled'])
+        self.assertNotEqual(changed['version'], missed['missed_version'])
+        self.automations.tick(new_time)
+        self.assertCountEqual(['in_app','missed'], [n['state'] for n in self.automations.inbox()])
 
     def test_daily_custom_reminder_respects_weekday_message_and_deduplication(self):
         self.turn('每周一9点提醒我复盘')

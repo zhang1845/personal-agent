@@ -1,4 +1,4 @@
-/* UI — clinical blueprint on frosted paper.
+/* Daynest — cream surfaces with charcoal controls.
    Framework tokens and component treatments; layout stays in styles.css. */
 @font-face {
   font-family: "Geist";
@@ -9,14 +9,14 @@
 }
 html[data-theme="light"] {
   color-scheme: light;
-  --color-canvas: #f5f5f5;
-  --color-paper: #ffffff;
-  --color-surface-alt: #fafafa;
-  --color-ink: #0a0a0a;
-  --color-ink-soft: #171717;
-  --color-mid-gray: #737373;
-  --color-hairline: #e5e5e5;
-  --color-ember: #e7000b;
+  --color-canvas: #faf3e6;
+  --color-paper: #fffaf2;
+  --color-surface-alt: #f6f0e4;
+  --color-ink: #171717;
+  --color-ink-soft: #393733;
+  --color-mid-gray: #655f56;
+  --color-hairline: #ded7ca;
+  --color-ember: #ae312a;
   --bg: var(--color-canvas);
   --paper: var(--color-paper);
   --white: var(--color-paper);
@@ -24,21 +24,31 @@ html[data-theme="light"] {
   --ink-soft: var(--color-ink-soft);
   --muted: var(--color-mid-gray);
   --accent: var(--color-ink);
-  --focus: var(--color-ink-soft);
+  --accent-hover: #333230;
+  --accent-wash: #ece7d9;
+  --focus: var(--accent);
   --danger: var(--color-ember);
   --line: var(--color-hairline);
   --control-border: var(--color-hairline);
-  --control-focus: #a3a3a3;
-  --radius: 18px;
-  --radius-control: 18px;
-  --radius-input: 18px;
-  --radius-wash: 18px;
-  --radius-panel: 24px;
+  --control-focus: #777065;
+  --radius: 8px;
+  --radius-control: 8px;
+  --radius-input: 8px;
+  --radius-wash: 9px;
+  --radius-panel: 13px;
   --surface-panel: var(--paper);
   --surface-subtle: var(--color-canvas);
-  --surface-hover: #ededed;
+  --surface-hover: #eae3d6;
   --surface-assistant: var(--paper);
-  --surface-sidebar: var(--color-surface-alt);
+  --surface-sidebar: var(--color-ink);
+  --sidebar-text: #fffaf2;
+  --sidebar-muted: #c9c5bf;
+  --sidebar-line: #373635;
+  --board-yellow: #f5d869;
+  --board-cream: var(--paper);
+  --board-neutral: #ece7d9;
+  --board-blue: #b7caeb;
+  --sidebar-pink: #f4bbd7;
   --surface-weekend: var(--color-surface-alt);
   --surface-modal: var(--paper);
   --surface-toast: var(--color-ink-soft);
@@ -47,12 +57,12 @@ html[data-theme="light"] {
   --danger-soft: #fff5f5;
   --danger-border: #fecaca;
   --overlay: rgba(10,10,10,.28);
-  --shadow-subtle: 0 0 0 1px rgba(23,23,23,.02), 0 1px 3px rgba(0,0,0,.06), 0 1px 2px -1px rgba(0,0,0,.06);
+  --shadow-subtle: 0 1px 2px rgba(36,30,21,.025);
   --shadow-dialog: 0 16px 48px rgba(0,0,0,.12);
   --font-ui: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-display: var(--font-ui);
   --font-mono: var(--font-ui);
-  --font-page: 2.25rem;
+  --font-page: clamp(1.75rem, 2.6vw, 2.375rem);
   --font-section: 1.125rem;
   --font-body: .875rem;
   --font-label: .875rem;
@@ -65,7 +75,7 @@ html[data-theme="light"] {
   --space-4: 1rem;
   --space-5: 1.5rem;
   --space-6: 2rem;
-  --page-max-width: 1280px;
+  --page-max-width: 1480px;
   --card-padding: 20px;
   font-family: var(--font-ui);
   font-weight: 400;
@@ -86,17 +96,17 @@ html[data-theme="light"] {
   --bulma-label-color: var(--ink-soft);
   --bulma-border: var(--line);
   --bulma-arrow-color: var(--muted);
-  --bulma-primary: var(--ink);
+  --bulma-primary: var(--accent);
   --bulma-primary-h: 0deg;
   --bulma-primary-s: 0%;
-  --bulma-primary-l: 4%;
+  --bulma-primary-l: 9%;
   --bulma-primary-invert-l: 100%;
   --bulma-primary-invert: var(--paper);
-  --bulma-link: var(--ink);
-  --bulma-link-text: var(--ink);
+  --bulma-link: var(--accent);
+  --bulma-link-text: var(--accent);
   --bulma-link-h: 0deg;
   --bulma-link-s: 0%;
-  --bulma-link-l: 4%;
+  --bulma-link-l: 9%;
   --bulma-link-invert-l: 100%;
   --bulma-size-normal: var(--font-label);
   --bulma-size-small: var(--font-small);
@@ -146,8 +156,8 @@ a { color: var(--ink); }
   box-shadow: none;
 }
 .button:hover { background: var(--surface-subtle); border-color: var(--line); color: var(--ink); }
-.button.is-primary { background: var(--ink); color: var(--paper); border-color: transparent; }
-.button.is-primary:hover { background: #262626; color: var(--paper); border-color: transparent; }
+.button.is-primary { background: var(--accent); color: var(--paper); border-color: transparent; }
+.button.is-primary:hover { background: var(--accent-hover); color: var(--paper); border-color: transparent; }
 .button.is-light { background: var(--surface-subtle); border-color: transparent; color: var(--ink); padding-inline: 14px; }
 .button.is-light:hover { background: var(--surface-hover); border-color: transparent; color: var(--ink); }
 .button.is-outlined { background: transparent; border-color: var(--line); color: var(--ink); }
@@ -162,11 +172,11 @@ a { color: var(--ink); }
 .button:focus-visible { box-shadow: none; outline: 2px solid var(--focus); outline-offset: 3px; }
 .input, .textarea, .select select {
   --bulma-input-placeholder-color: var(--muted);
-  --bulma-input-border-color: transparent;
+  --bulma-input-border-color: var(--control-border);
   --bulma-input-radius: var(--radius-input);
-  background: var(--surface-subtle);
+  background: var(--paper);
   color: var(--ink);
-  border: 1px solid transparent;
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-input);
   padding-inline: 12px;
   box-shadow: none;
@@ -189,7 +199,11 @@ input[type=file]::file-selector-button { border: 1px solid var(--line); border-r
 .breadcrumb li+li::before { content: "›"; }
 .calendar-date-button, .calendar-cell-add, .calendar-event-chip, .calendar-more-events { border: 0; font-family: inherit; cursor: pointer; color: var(--ink); }
 :where(button, a, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-input[type=checkbox] { accent-color: var(--ink); }
+input[type=checkbox] { accent-color: var(--accent); }
 .chat-composer .textarea { border: 0; box-shadow: none; }
 .chat-composer .textarea:focus { border-color: transparent; box-shadow: none; outline: none; }
 @media (forced-colors: active) { .button, .surface, .input, .textarea, .select select, dialog { border: 1px solid CanvasText; } }
+
+.reminder-reschedule summary { cursor: pointer; width: fit-content; }
+.reminder-reschedule form { margin-top: .5rem; display: grid; gap: .5rem; justify-items: start; }
+.reminder-reschedule .input { max-width: 18rem; }

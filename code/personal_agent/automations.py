@@ -22,6 +22,8 @@ class Automations(PersonalStore):
             c.execute('CREATE TABLE IF NOT EXISTS notifications(id TEXT PRIMARY KEY,dedupe TEXT UNIQUE,job_id TEXT,title TEXT,body TEXT,state TEXT,created_at TEXT,read INTEGER NOT NULL DEFAULT 0)')
             columns={row['name'] for row in c.execute('PRAGMA table_info(notifications)')}
             if 'in_app_only' not in columns:c.execute('ALTER TABLE notifications ADD COLUMN in_app_only INTEGER NOT NULL DEFAULT 0')
+            if 'missed_version' not in columns:
+                c.execute('ALTER TABLE notifications ADD COLUMN missed_version INTEGER')
             c.execute("UPDATE notifications SET state='unknown' WHERE state='sending'")
     def settings(self):return self.config.public()
     def save_settings(self,body):
@@ -131,6 +133,31 @@ class Automations(PersonalStore):
         lines += [parse_datetime(e['start'],tz).astimezone(tz).strftime('%H:%M')+' '+e['title'] for e in events]
         lines += ['待办：'+t['title'] for t in relevant]
         return '\n'.join(lines)
+    def _finish_one_time(self, job, due, instant, tz):
+        lag = instant.astimezone(timezone.utc) - due
+        if lag < timedelta(0):
+            return
+        missed = lag > timedelta(minutes=5)
+        data = {key: value for key, value in job.items() if key not in ('id', 'version')}
+        data['enabled'] = False
+        body = job['message']
+        if missed:
+            original = due.astimezone(tz).strftime('%Y-%m-%d %H:%M')
+            body = f"原定 {original}（{tz}）提醒。\n{body}"
+        # Retire exactly the observed version and record its one delivery decision together.
+        with self.connection() as conn:
+            changed = conn.execute('UPDATE jobs SET body=?,version=version+1 WHERE id=? AND version=?',
+                                   (json.dumps(data), job['id'], job['version']))
+            if not changed.rowcount:
+                return
+            conn.execute(
+                """INSERT INTO notifications(id,dedupe,job_id,title,body,state,created_at,in_app_only,missed_version)
+                   VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(dedupe) DO NOTHING""",
+                (uuid4().hex, f"{job['id']}:once:{job['version']}:{job['run_at']}", job['id'], job['name'],
+                 body, 'missed' if missed else 'queued', now(), int(missed or job.get('in_app_only', False)),
+                 job['version'] + 1 if missed else None),
+            )
+
     def tick(self,instant=None):
         if not self.tick_lock.acquire(False):return
         try:
@@ -139,13 +166,7 @@ class Automations(PersonalStore):
                 if not job['enabled']:continue
                 try:
                     if job['kind']=='one_time':
-                        due=parse_datetime(job['run_at'],tz);lag=instant.astimezone(timezone.utc)-due
-                        if lag<timedelta(0):continue
-                        if lag<=timedelta(minutes=5):
-                            self.emit(job['id']+':once:'+str(job['version'])+':'+job['run_at'],job['id'],job['name'],job['message'],in_app_only=job.get('in_app_only',False))
-                        # Persist completion even when the scheduled time was missed.
-                        data={k:v for k,v in job.items() if k not in ('id','version')};data['enabled']=False
-                        with self.connection() as c:c.execute('UPDATE jobs SET body=?,version=version+1 WHERE id=? AND version=?',(json.dumps(data),job['id'],job['version']))
+                        self._finish_one_time(job, parse_datetime(job['run_at'], tz), instant, tz)
                         continue
                     if local.weekday() not in job['weekdays']:continue
                     if job['kind']=='event_reminders':
