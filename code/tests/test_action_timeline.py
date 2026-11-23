@@ -2,6 +2,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -106,7 +107,7 @@ class ActionTimelineTests(unittest.TestCase):
 
     def test_upgrade_preserves_unlinked_drafts(self):
         path = Path(self.temp.name) / "legacy.sqlite3"
-        with sqlite3.connect(path) as c:
+        with closing(sqlite3.connect(path)) as c, c:
             c.execute("CREATE TABLE actions(id TEXT PRIMARY KEY, session_id TEXT, tool TEXT, arguments TEXT, title TEXT, status TEXT, result TEXT, created_at TEXT)")
             c.execute("INSERT INTO actions VALUES ('older','s','assistant_add_task','{}','旧草案','pending',NULL,'2025-01-01')")
         store = PersonalStore(path)
