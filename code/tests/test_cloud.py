@@ -139,6 +139,28 @@ class CloudGatewayTests(unittest.TestCase):
         self.assertEqual(200,self.request('GET','/login')[0])
         self.assertEqual(200,self.request('GET','/login.css')[0])
 
+    def test_public_workspace_shares_real_data_but_keeps_connection_secrets_owner_managed(self):
+        self.gateway.close()
+        config = CloudConfig.from_env({'DAYNEST_PUBLIC_URL': self.config.origin,
+            'DAYNEST_DATA_DIR': str(self.config.data_dir), 'DAYNEST_PASSWORD_HASH': HASH,
+            'DAYNEST_ACCESS': 'public'})
+        self.gateway = CloudGateway(config, model_client=web_helpers.OfflineModel(), scheduler=False)
+        self.assertEqual(200, self.request('GET', '/')[0])
+        code, _, boot = self.request('GET', '/api/bootstrap')
+        self.assertEqual(200, code)
+        self.assertTrue(boot['deployment']['guest'])
+        self.csrf = boot['token']
+        self.assertEqual(403, self.request('POST', '/api/tasks', {'title':'public task'})[0])
+        self.assertEqual(200, self.mutate('POST', '/api/tasks', {'title':'public task'})[0])
+        for path in ('/api/model-api', '/api/caldav', '/api/notifications/settings'):
+            code, _, result = self.mutate('PUT', path, {})
+            self.assertEqual(403, code)
+            self.assertEqual('owner_required', result['error']['code'])
+        self.login()
+        self.assertFalse(self.request('GET', '/api/bootstrap')[2]['deployment']['guest'])
+        self.assertEqual('public task', self.request('GET', '/api/tasks')[2]['tasks'][0]['title'])
+        self.assertEqual('/', self.request('POST', '/logout')[1]['Location'])
+
     def test_secure_cookie_bootstrap_and_logout_replay(self):
         headers=self.login()
         for flag in ('Secure','HttpOnly','SameSite=Strict','Path=/'):self.assertIn(flag,headers['Set-Cookie'])

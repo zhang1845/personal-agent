@@ -1164,7 +1164,7 @@
   }
   async function boot() {
     decorateIcons(); bindEvents(); initializeChatLayout(); renderChatDraft(); updateChatControls(); renderChat();
-    try { const bootstrap = await api("/api/bootstrap"); state.token = bootstrap.token || bootstrap.csrf_token || ""; state.status = bootstrap.status; state.prefs = bootstrap.preferences || {}; state.cloudMode = bootstrap.deployment?.mode === "cloud"; $("cloud-session").hidden = !state.cloudMode;
+    try { const bootstrap = await api("/api/bootstrap"); state.token = bootstrap.token || bootstrap.csrf_token || ""; state.status = bootstrap.status; state.prefs = bootstrap.preferences || {}; state.cloudMode = bootstrap.deployment?.mode === "cloud"; $("cloud-session").hidden = !state.cloudMode || bootstrap.deployment?.guest === true;
       $("cloud-reminder-note").hidden = bootstrap.deployment?.reminders !== "on_demand";
       knowledgeUI = new KnowledgeUI({api, el, busy, showError, toast, confirmOperation,
         onProjects(projects) { const select = $("chat-project"); select.replaceChildren(); const first = el("option", "", "不限定项目"); first.value = ""; select.append(first); projects.forEach((project) => { const option = el("option", "", project.name); option.value = project.id; select.append(option); }); if (!projects.some(p => p.id === state.chatProjectId)) state.chatProjectId = null; select.value = state.chatProjectId || ""; },

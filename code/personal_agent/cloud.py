@@ -53,6 +53,7 @@ class CloudConfig:
     origin: str
     data_dir: Path
     password: str
+    public_workspace: bool = False
 
     @classmethod
     def from_env(cls, values=None):
@@ -81,7 +82,11 @@ class CloudConfig:
             authority = hostname
         if parts.port is not None and parts.port != 443:
             authority += f':{parts.port}'
-        return cls('https://' + authority, data, validate_hash(values.get('DAYNEST_PASSWORD_HASH')))
+        access = values.get('DAYNEST_ACCESS', 'private')
+        if access not in ('private', 'public'):
+            raise ValueError('DAYNEST_ACCESS 须为 private 或 public')
+        return cls('https://' + authority, data, validate_hash(values.get('DAYNEST_PASSWORD_HASH')),
+                   public_workspace=access == 'public')
 
 
 class AuthStore:
@@ -254,16 +259,24 @@ class CloudGateway:
                                        '尝试次数过多，请10分钟后重试' if state == 'limited' else '密码不正确')
             cookie = f'{COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={SESSION_SECONDS}'
             return self.respond(start, 303, b'', extra=[('Location', '/'), ('Set-Cookie', cookie)])
-        if not authenticated:
+        if not authenticated and not self.config.public_workspace:
             if path.startswith('/api/'):
                 return self.respond(start, 401, {'error': {'code': 'authentication_required', 'message': '请先登录 Daynest'}})
             return self.respond(start, 303, b'', extra=[('Location', '/login')])
+        # Guests share the actual workbench. Only the owner may change the
+        # destinations and credentials used for outbound integrations.
+        if not authenticated and method == 'PUT' and path in (
+                '/api/model-api', '/api/caldav', '/api/notifications/settings'):
+            return self.respond(start, 403, {'error': {'code': 'owner_required',
+                'message': '仅管理员可修改连接配置，请通过 /login 登录。'}})
         self.authenticated_request(path, method)
         if path == '/logout':
             if method != 'POST':
                 return self.respond(start, 405, b'')
-            self.auth.logout(token)
-            return self.respond(start, 303, b'', extra=[('Location', '/login'),
+            if authenticated:
+                self.auth.logout(token)
+            location = '/' if self.config.public_workspace else '/login'
+            return self.respond(start, 303, b'', extra=[('Location', location),
                 ('Set-Cookie', f'{COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0')])
         if method not in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE'):
             return self.respond(start, 405, b'')
@@ -295,6 +308,8 @@ class CloudGateway:
             if path == '/api/bootstrap' and response.status == 200:
                 value = json.loads(content)
                 value['deployment'] = self.deployment_info()
+                if self.config.public_workspace:
+                    value['deployment']['guest'] = not authenticated
                 content = json.dumps(value, ensure_ascii=False).encode('utf-8')
             return self.respond(start, response.status, content, kind, extra)
         except (OSError, TimeoutError):
